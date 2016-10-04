@@ -1,6 +1,7 @@
 -- we create a different schema. it's assumed that we already have
--- a postgis extension enabled database, and data for bucharest
--- imported.
+-- a postgis extension enabled database, and OSM data for bucharest
+-- imported. we will use said data to populate the parcel table with
+-- a few test polygons. we'll use that data afterwards in our algorithm.
 CREATE SCHEMA plan;
 SET search_path = public, plan;
 CREATE TABLE parcel (
