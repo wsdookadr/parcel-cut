@@ -1,0 +1,17 @@
+# #+BEGIN_SRC sql :engine postgresql :dbpassword test1 :database dbgeo1 :results drawer :exports code
+# #+BEGIN_SRC sql :engine postgresql :dbpassword test1 :dbuser user :database dbgeo1 :exports code :results silent
+
+#+BEGIN_SRC sql -n :engine postgresql :exports code :cmdline "-A -t -w -h localhost -d dbgeo1 -U user" :cache no
+\COPY (
+SELECT
+name, way
+FROM planet_osm_polygon
+WHERE tags->'leisure'='park'
+AND name LIKE '%Herăstrău%'
+ORDER BY ST_Area(way) DESC
+LIMIT 1
+) TO '/tmp/data.copy';
+#+END_SRC
+
+#+RESULTS:
+
