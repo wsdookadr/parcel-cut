@@ -20,6 +20,7 @@ WITH settings AS (
 ), a AS (
         SELECT name, way, ST_Centroid(way) poi
         FROM parcel
+        LIMIT 1
 ), b AS (
         SELECT concat('<path d="'
                 , ST_AsSVG(way, 0, 10)
