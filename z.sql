@@ -1,6 +1,8 @@
 \set QUIET 1
 \a
 \pset footer off
+\pset tuples_only
+\pset pager off
 SET search_path = public, plan;
 \set QUIET 0
 WITH settings AS (
