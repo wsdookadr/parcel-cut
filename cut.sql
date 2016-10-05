@@ -28,7 +28,7 @@ WITH a AS (
 SELECT
 '<html><svg width="100%" height="100%" preserveAspectRatio="" viewBox="' ||
 concat_ws(' ', ST_XMin(d.env), ST_YMax(d.env) * -1, (ST_XMax(d.env) - ST_XMin(d.env)), (ST_YMax(d.env) - ST_YMin(d.env))) || '">' ||
-'<path style="fill:none; stroke:red; stroke-width:0.00005" d="' || ST_AsSVG(a.way) || '"/>' ||
+'<path fill="wheat" stroke="red" stroke-width="0.00005" d="' || ST_AsSVG(a.way) || '"/>' ||
 '</svg></html>'
 FROM a,d;
 
