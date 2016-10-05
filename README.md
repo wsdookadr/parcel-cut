@@ -9,3 +9,7 @@ populate tables in the "plan" schema.
 
 The current version includes code to render the existing polygons in
 the parcel table.
+
+The algorithm is expected to work on
+- PostgreSQL >= 9.4.7
+- PostGIS    >= 2.2.2

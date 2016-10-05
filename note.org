@@ -61,3 +61,48 @@ CROSS JOIN LATERAL (
 | 284325583 | Autostrada A3 București - Brașov | 91797290 | Parcul Herăstrău | 4810.49220818408 |
 | 284325584 | Autostrada A3 București - Brașov | 88337000 | Parcul Herăstrău | 5214.54571198697 |
 
+* Detailed Spec
+The algorithm that will be described is intended primarily for [[https://en.wikipedia.org/wiki/Simple_polygon][simple polygons]].
+
+We have a polygon P (also known as big parcel) and the nearest road
+R. We get the bounding box B for P and all our searches for cutting
+points/lines will be confined to B. We extract points PN,PE,PW,PS for
+all extreme cardinal points.
+
+Goal: We want to cut a corner C (also called subdivision) from P that
+contains the nearest-to-road point as one of its edges. The cut will
+be done using two lines, one vertical (we'll also call this
+green-line) and one horizontal (we'll also call this the red-line). We
+want C to be of a given area A.
+
+
+Now get the closest point on R to P (we call this Q, this is the
+nearest point on the road to the polygon).
+
+#+BEGIN_COMMENT
+From here on, we convert B to a point grid G (also called a fishnet),
+and we'll search for points in G such that we can do the split we
+want.
+#+END_COMMENT
+
+We take a sweeping-line approach (this will be the green-line). This
+sweeping line will move in the opposite direction to the
+nearest-to-road-point.
+
+Because we anticipate C to have a rectangular shape, we give the
+sweeping-line a head-start of sqrt(A).
+
+The sweeping line will advance until the covered area is greater or
+equal to A, after which it will stop (if it goes beyond P's cover,
+we can conclude there is no C).
+
+When the green-line is in place, we now have to position the red-line
+and we can do that with the left-side fixed, and just look for the
+right spot for the right side.
+
+* References
+
+Fishnets:
+- http://gis.stackexchange.com/a/16390/22412
+- https://trac.osgeo.org/postgis/wiki/UsersWikiCreateFishnet
+- https://www.kindle-maps.com/blog/splitting-a-large-polygon-into-a-grid.html
