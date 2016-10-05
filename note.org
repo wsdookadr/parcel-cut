@@ -1,6 +1,8 @@
 # #+BEGIN_SRC sql :engine postgresql :dbpassword test1 :database dbgeo1 :results drawer :exports code
 # #+BEGIN_SRC sql :engine postgresql :dbpassword test1 :dbuser user :database dbgeo1 :exports code :results silent
 
+* Query to get test parcels
+
 #+BEGIN_SRC sql -n :engine postgresql :exports code :cmdline "-A -t -w -h localhost -d dbgeo1 -U user" :cache no
 \COPY (
 SELECT
@@ -14,4 +16,48 @@ LIMIT 1
 #+END_SRC
 
 #+RESULTS:
+
+* Get roads near parcels (using KNN)
+
+#+BEGIN_SRC sql -n :engine postgresql :exports code :cmdline "-A -w -h localhost -d dbgeo1 -U user" :cache no
+WITH
+parcels AS (
+    SELECT
+    osm_id, name, way
+    FROM planet_osm_polygon
+    WHERE
+    tags->'leisure'='park'
+    AND name LIKE '%Herăstrău%'
+    LIMIT 3
+), roads AS (
+    SELECT
+    osm_id, name, way
+    FROM planet_osm_line
+    WHERE tags->highway = 'motorway'
+)
+-- do KNN cross-join between parcels and roads
+-- to get nearby roads (rn)
+SELECT
+DISTINCT ON (rn.osm_id)
+rn.osm_id, rn.name, p.osm_id, p.name, dr
+FROM parcels p
+CROSS JOIN LATERAL (
+    SELECT
+    *,
+    -- distance to road
+    ST_Distance(p.way,r.way) as dr
+    FROM roads r
+    ORDER BY p.way <-> r.way
+    LIMIT 5
+) rn;
+#+END_SRC
+
+#+RESULTS:
+|    osm_id | name                             |   osm_id | name             |               dr |
+|-----------+----------------------------------+----------+------------------+------------------|
+| 256097200 | Autostrada A3 București - Brașov | 91797290 | Parcul Herăstrău | 4811.94254256013 |
+| 284325578 | Autostrada A3 București - Brașov | 88337012 | Parcul Herăstrău | 4720.09021304696 |
+| 284325581 | Autostrada A3 București - Brașov | 91797290 | Parcul Herăstrău | 5646.77391636125 |
+| 284325583 | Autostrada A3 București - Brașov | 91797290 | Parcul Herăstrău | 4810.49220818408 |
+| 284325584 | Autostrada A3 București - Brașov | 88337000 | Parcul Herăstrău | 5214.54571198697 |
 
