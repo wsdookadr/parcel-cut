@@ -1,10 +1,16 @@
+-- this block will make some settings and
+-- supress unneeded output 
 \set QUIET 1
 \a
+-- turn off footer
 \pset footer off
+-- turn off column names
 \pset tuples_only
+-- turn off any more verbose output from psql
 \pset pager off
 SET search_path = public, plan;
 \set QUIET 0
+
 WITH settings AS (
         SELECT    'wheat' :: text AS fill_poly
                 , 'white' :: text AS stroke_poly
