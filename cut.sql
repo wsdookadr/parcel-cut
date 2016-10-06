@@ -28,6 +28,8 @@ BEGIN
             name, way
             FROM road
         ), d AS (
+            -- get bounding box of all shapes
+            -- as it will be later used for the svg viewport
             SELECT
             ST_Envelope(ST_Collect(way)) env
             FROM a
@@ -39,14 +41,14 @@ BEGIN
             SELECT
             string_agg(path,'') AS paths
             FROM (
-                -- draw parcels different
-                -- from roads
+                -- differentiate between different types of
+                -- objects to be drawn
                 SELECT
                 (
                     CASE WHEN ST_GeometryType(way) = 'ST_Polygon' THEN
                         '<path fill="wheat" stroke="red"  stroke-width="4" d="' || ST_AsSVG(way) || '"/>'
                     WHEN ST_GeometryType(way) = 'ST_LineString' THEN
-                        '<path fill="wheat" stroke="blue" stroke-width="4" d="' || ST_AsSVG(way) || '"/>'
+                        '<path fill="white" stroke="blue" stroke-width="8" d="' || ST_AsSVG(way) || '"/>'
                     END
                 ) AS path
                 FROM a
@@ -54,10 +56,10 @@ BEGIN
         ), svg AS (
             SELECT
             (
-            '<html><svg width="100%" height="100%" preserveAspectRatio="" viewBox="' ||
-            concat_ws(' ', ST_XMin(d.env), ST_YMax(d.env) * -1, (ST_XMax(d.env) - ST_XMin(d.env)), (ST_YMax(d.env) - ST_YMin(d.env))) || '">' ||
-            e.paths ||
-            '</svg></html>'
+                '<html><svg width="100%" height="100%" preserveAspectRatio="" viewBox="' ||
+                concat_ws(' ', ST_XMin(d.env), ST_YMax(d.env) * -1, (ST_XMax(d.env) - ST_XMin(d.env)), (ST_YMax(d.env) - ST_YMin(d.env))) || '">' ||
+                e.paths ||
+                '</svg></html>'
             ) AS content
             FROM e, d
         )
