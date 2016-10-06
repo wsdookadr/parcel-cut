@@ -23,7 +23,10 @@ BEGIN
             SELECT
             name, way
             FROM parcel
-            LIMIT 1
+            UNION ALL
+            SELECT
+            name, way
+            FROM road
         ), d AS (
             SELECT
             ST_Envelope(ST_Collect(way)) env
@@ -32,15 +35,31 @@ BEGIN
             SELECT
             ST_Centroid(env) AS w
             FROM d
+        ), e AS (
+            SELECT
+            string_agg(path,'') AS paths
+            FROM (
+                -- draw parcels different
+                -- from roads
+                SELECT
+                (
+                    CASE WHEN ST_GeometryType(way) = 'ST_Polygon' THEN
+                        '<path fill="wheat" stroke="red"  stroke-width="4" d="' || ST_AsSVG(way) || '"/>'
+                    WHEN ST_GeometryType(way) = 'ST_LineString' THEN
+                        '<path fill="wheat" stroke="blue" stroke-width="4" d="' || ST_AsSVG(way) || '"/>'
+                    END
+                ) AS path
+                FROM a
+            ) q
         ), svg AS (
             SELECT
             (
             '<html><svg width="100%" height="100%" preserveAspectRatio="" viewBox="' ||
             concat_ws(' ', ST_XMin(d.env), ST_YMax(d.env) * -1, (ST_XMax(d.env) - ST_XMin(d.env)), (ST_YMax(d.env) - ST_YMin(d.env))) || '">' ||
-            '<path fill="wheat" stroke="red" stroke-width="0.00005" d="' || ST_AsSVG(a.way) || '"/>' ||
+            e.paths ||
             '</svg></html>'
             ) AS content
-            FROM a,d
+            FROM e, d
         )
         SELECT content
         FROM svg
