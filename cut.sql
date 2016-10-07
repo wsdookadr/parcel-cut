@@ -91,7 +91,6 @@ END;
 $$ LANGUAGE plpgsql;
 \set QUIET 0
 
-
 \set QUIET 1
 -- this function will implement the corner-cut algorithm
 DROP FUNCTION pseudo_parcel(integer, integer);
@@ -103,9 +102,10 @@ BEGIN
     bbox := (SELECT ST_ExteriorRing(ST_Envelope(way)) AS way FROM parcel WHERE gid = p_uid);
     INSERT INTO support(way) VALUES (bbox);
     nesw := (
-        -- intersect the ring of polygon with the
-        -- ring of its envelope(bounding-box) to get the
-        -- extremum points
+        -- intersect the polygon ring with the
+        -- envelope(bounding-box) ring to get the
+        -- extremum points (north,east,south,west).
+        --
         -- (the result is an ST_MultiPoint, so it will need
         --  to be unpacked in order to be used)
         SELECT ST_Intersection(ST_ExteriorRing(way), ST_ExteriorRing(ST_Envelope(way))) AS way

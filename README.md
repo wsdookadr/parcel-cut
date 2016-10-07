@@ -13,3 +13,5 @@ the parcel table.
 The algorithm is expected to work on
 - PostgreSQL >= 9.4.7
 - PostGIS    >= 2.2.2
+
+For the current version, we'll use test data from OSM in Bucharest.
