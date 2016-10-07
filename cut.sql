@@ -24,16 +24,16 @@ BEGIN
             -- unions together all the objects
             -- we want to draw
             SELECT
-            name, way, 'support' AS _type
-            FROM support
-            UNION ALL
-            SELECT
             name, way, 'parcel' AS _type
             FROM parcel
             UNION ALL
             SELECT
             name, way, 'road' AS _type
             FROM road
+            UNION ALL
+            SELECT
+            name, way, 'support' AS _type
+            FROM support
         ), d AS (
             -- get bounding box of all shapes
             -- as it will be later used for the svg viewport
@@ -57,11 +57,20 @@ BEGIN
                         '<path fill="wheat" stroke="red"  stroke-width="4" d="' || ST_AsSVG(way) || '"/>'
                     WHEN _type = 'road' THEN
                         '<path fill-opacity="0" stroke="blue" stroke-width="8" d="' || ST_AsSVG(way) || '"/>'
-                    WHEN _type = 'support' THEN
-                        '<path fill="orange" stroke="green" stroke-width="20" d="' || ST_AsSVG(way) || '"/>'
+                    WHEN _type = 'support' AND ST_GeometryType(way) = 'ST_LineString' THEN
+                        '<path fill-opacity="0" stroke="green" stroke-width="13" d="' || ST_AsSVG(way) || '"/>'
+                    WHEN _type = 'support' AND ST_GeometryType(way) = 'ST_Point' THEN
+                        '<circle fill-opacity="1" fill="steelblue" stroke="royalblue" stroke-width="10" r="20" ' || ST_AsSVG(way) || '/>'
                     END
                 ) AS path
-                FROM a
+                FROM (
+                    -- unpack multi structures
+                    SELECT
+                    name,
+                    _type,
+                    (st_dump(way)).geom AS way
+                    FROM a
+                ) b
             ) q
         ), svg AS (
             SELECT
@@ -84,22 +93,32 @@ $$ LANGUAGE plpgsql;
 
 
 \set QUIET 1
-TRUNCATE support RESTART IDENTITY;
 -- this function will implement the corner-cut algorithm
 DROP FUNCTION pseudo_parcel(integer, integer);
 CREATE OR REPLACE FUNCTION pseudo_parcel(p_uid integer, area integer) RETURNS void AS $$
 DECLARE
 bbox geometry;
+nesw geometry;
 BEGIN
-    bbox := (SELECT ST_Envelope(way) AS way FROM parcel WHERE gid = p_uid);
+    bbox := (SELECT ST_ExteriorRing(ST_Envelope(way)) AS way FROM parcel WHERE gid = p_uid);
     INSERT INTO support(way) VALUES (bbox);
+    nesw := (
+        -- intersect the ring of polygon with the
+        -- ring of its envelope(bounding-box) to get the
+        -- extremum points
+        -- (the result is an ST_MultiPoint, so it will need
+        --  to be unpacked in order to be used)
+        SELECT ST_Intersection(ST_ExteriorRing(way), ST_ExteriorRing(ST_Envelope(way))) AS way
+        FROM (SELECT way FROM parcel WHERE gid = p_uid) a
+    );
+
+    INSERT INTO support(way)
+    VALUES(nesw);
+
     RAISE NOTICE '%', bbox;
 END;
 $$ LANGUAGE plpgsql;
 \set QUIET 0
 
 SELECT pseudo_parcel(1,2);
-SELECT pseudo_parcel(2,2);
-SELECT pseudo_parcel(3,2);
-SELECT pseudo_parcel(4,2);
 SELECT parcels_draw();

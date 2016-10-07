@@ -29,3 +29,4 @@ CREATE TABLE support (
     name text,
     way geometry(Geometry,900913)
 );
+CREATE INDEX support_index ON support USING gist (way);

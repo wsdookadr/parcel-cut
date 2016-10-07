@@ -49,3 +49,4 @@ TRUNCATE road   RESTART IDENTITY;
 \copy parcel (name, way) FROM '/tmp/parcels.copy' DELIMITER ',' CSV HEADER;
 \copy road   (name, way) FROM '/tmp/roads.copy'   DELIMITER ',' CSV HEADER;
 
+TRUNCATE support RESTART IDENTITY;
