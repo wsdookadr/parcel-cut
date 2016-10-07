@@ -104,7 +104,8 @@ right spot for the right side.
 
 * Implementation
 ** Visualization
-- [ ] Need to use [[http://postgis.net/docs/ST_GeometryType.html][ST_GeometryType]] to draw parcels and roads differently
+- [X] Need to use [[http://postgis.net/docs/ST_GeometryType.html][ST_GeometryType]] to draw parcels and roads differently
+- [ ] Round off coordinates to save space on the SVG.
 ** Core algorithm
 - 
 * Other
