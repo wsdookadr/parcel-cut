@@ -59,6 +59,8 @@ BEGIN
                         '<path fill-opacity="0" stroke="blue" stroke-width="8" d="' || ST_AsSVG(way) || '"/>'
                     WHEN _type = 'support' AND ST_GeometryType(way) = 'ST_LineString' THEN
                         '<path fill-opacity="0" stroke="violet" stroke-width="13" d="' || ST_AsSVG(way) || '"/>'
+                    WHEN _type = 'support' AND ST_GeometryType(way) = 'ST_Polygon' THEN
+                        '<path fill-opacity="0.2" fill="green" stroke="orange" stroke-width="13" d="' || ST_AsSVG(way) || '"/>'
                     WHEN _type = 'support' AND ST_GeometryType(way) = 'ST_Point' THEN
                         '<circle fill-opacity="1" fill="steelblue" stroke="royalblue" stroke-width="10" r="20" ' || ST_AsSVG(way) || '/>'
                     END
@@ -99,10 +101,11 @@ $$ LANGUAGE plpgsql;
 DROP FUNCTION pseudo_parcel(integer, integer);
 CREATE OR REPLACE FUNCTION pseudo_parcel(p_uid integer, area integer) RETURNS void AS $$
 DECLARE
-bbox     geometry;
-nesw     geometry;
--- closest extreme point that is nearest to a
-qw      text;
+bbox    geometry;
+-- extreme cardinal points on the polygon boundary
+nesw    geometry[];
+-- two extreme points closest to the nearest road, and the road point itself
+rc2     geometry[];
 BEGIN
     bbox := (
         -- get parcel boundary
@@ -110,45 +113,94 @@ BEGIN
         FROM parcel
         WHERE gid = p_uid
     );
-
     INSERT INTO support(way) VALUES (bbox);
+
+    -- in NESW we have all the extreme points on the boundary
+    -- sorted by azimuth, so nesw[1] is north, nesw[2] is east
+    -- nesw[3] is south, nesw[4] is west.
     nesw := (
-        -- intersect the polygon ring with the
-        -- envelope(bounding-box) ring to get the boundary
-        -- extremum points (north,east,south,west).
-        --
-        -- (the result is an ST_MultiPoint, so it will need
-        --  to be unpacked in order to be used)
-        SELECT ST_Intersection(ST_ExteriorRing(way), ST_ExteriorRing(ST_Envelope(way))) AS way
-        FROM (SELECT way FROM parcel WHERE gid = p_uid) a
+        WITH int AS (
+            -- intersect the polygon ring with the
+            -- envelope(bounding-box) ring to get the boundary
+            -- extremum points (north,east,south,west).
+            --
+            -- (the result is an ST_MultiPoint, so it will need
+            --  to be unpacked in order to be used)
+            SELECT ST_Intersection(ST_ExteriorRing(way), ST_ExteriorRing(ST_Envelope(way))) AS way
+            FROM (
+                SELECT way 
+                FROM parcel 
+                WHERE gid = p_uid
+            ) a
+        ), unpacked AS (
+            -- unpack ST_MultiPoint to ST_Point
+            SELECT (ST_Dump(way)).geom AS p
+            FROM int
+        ), center AS (
+            -- get centroid of polygon defined by N,E,S,W extreme points
+            SELECT
+            ST_Centroid(ST_ConvexHull(ST_Collect(p))) AS c
+            FROM unpacked
+        ), sorted_cw AS (
+            -- sort extreme points clock-wise
+            SELECT
+            a.p AS way
+            FROM unpacked a, center b
+            ORDER BY -ST_Azimuth(b.c, a.p)
+        )
+        SELECT array_agg(way)
+        FROM sorted_cw
     );
+
+    INSERT INTO support(way) SELECT unnest(nesw);
+
     INSERT INTO support(way)
-    VALUES(nesw);
+    SELECT ST_ConvexHull(ST_Collect(way))
+    FROM (SELECT unnest(nesw) AS way) a;
 
     -- Note: Here we need to figure out which corner we're going to cut.
     -- We can cut one of these corners: NW,NE,SE,SW.
     -- We decide which corner based on two-closest extreme points
     -- to a nearby road.
-    WITH close_pair AS (
-        -- find the closest point on all of the nearby roads
-        -- that's nearest to one of the extreme boundary points.
+    rc2 := (
+        WITH close_pair AS (
+            -- find the closest point on all of the nearby roads
+            -- that's nearest to one of the extreme boundary points.
+            SELECT
+            ST_ClosestPoint(a.way,b.way) AS on_road,
+            b.way AS on_parcel
+            FROM road a, (SELECT way FROM unnest(nesw) m(way)) b
+            ORDER BY ST_ClosestPoint(a.way,b.way) <-> b.way
+            LIMIT 1
+        ), other_extreme AS (
+            -- find the other extreme point close to the road point
+            SELECT
+            b.on_parcel
+            FROM close_pair a, (SELECT way AS on_parcel FROM unnest(nesw) m(way)) b
+            WHERE ST_AsText(a.on_parcel) <> ST_AsText(b.on_parcel)
+            ORDER BY b.on_parcel <-> a.on_road
+            LIMIT 1
+        )
         SELECT
-        ST_ClosestPoint(a.way,b.way) AS on_road,
-        b.way AS on_parcel
-        FROM road a, (SELECT (ST_Dump(nesw)).geom AS way) b
-        ORDER BY ST_ClosestPoint(a.way,b.way) <-> b.way
-        LIMIT 1
-    ), other_extreme AS (
-        -- find the other extreme point close to the road point
-        SELECT
-        b.on_parcel
-        FROM close_pair a, (SELECT (ST_Dump(nesw)).geom AS on_parcel) b
-        WHERE ST_AsText(a.on_parcel) <> ST_AsText(b.on_parcel)
-        ORDER BY b.on_parcel <-> a.on_road
-    )
-    INSERT INTO support(way)
-    SELECT ST_MakeLine(a.on_road, a.on_parcel)
-    FROM close_pair a;
+        ARRAY[a.on_parcel, b.on_parcel, a.on_road]
+        FROM close_pair a, other_extreme b
+    );
+
+
+    INSERT INTO support(way) SELECT ST_MakeLine(rc2[1], rc2[3]);
+    INSERT INTO support(way) SELECT ST_MakeLine(rc2[2], rc2[3]);
+
+    IF  rc2[2] = nesw[2] THEN
+        RAISE NOTICE 'north cut';
+    END IF;
+
+    -- INSERT INTO support(way)
+    -- SELECT ST_MakeLine(a.on_road, a.on_parcel)
+    -- FROM close_pair a
+    -- UNION
+    -- SELECT ST_MakeLine(a.on_road, b.on_parcel)
+    -- FROM close_pair a, other_extreme b;
+
 
     -- TODO: need to take the decision here on which
     -- direction to sweep in
