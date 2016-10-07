@@ -103,7 +103,7 @@ BEGIN
     INSERT INTO support(way) VALUES (bbox);
     nesw := (
         -- intersect the polygon ring with the
-        -- envelope(bounding-box) ring to get the
+        -- envelope(bounding-box) ring to get the boundary
         -- extremum points (north,east,south,west).
         --
         -- (the result is an ST_MultiPoint, so it will need
@@ -111,7 +111,6 @@ BEGIN
         SELECT ST_Intersection(ST_ExteriorRing(way), ST_ExteriorRing(ST_Envelope(way))) AS way
         FROM (SELECT way FROM parcel WHERE gid = p_uid) a
     );
-
     INSERT INTO support(way)
     VALUES(nesw);
 
