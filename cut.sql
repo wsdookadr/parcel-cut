@@ -1,5 +1,5 @@
--- this block will set some flags, and supress unneeded output
--- from the output. this is the workbench program where most development
+-- this block will set some flags, and supress unneeded output.
+-- this is the workbench program where most development
 -- will be carried out and we want to output an SVG from here.
 \set QUIET 1
 \a
@@ -58,7 +58,7 @@ BEGIN
                     WHEN _type = 'road' THEN
                         '<path fill-opacity="0" stroke="blue" stroke-width="8" d="' || ST_AsSVG(way) || '"/>'
                     WHEN _type = 'support' AND ST_GeometryType(way) = 'ST_LineString' THEN
-                        '<path fill-opacity="0" stroke="green" stroke-width="13" d="' || ST_AsSVG(way) || '"/>'
+                        '<path fill-opacity="0" stroke="violet" stroke-width="13" d="' || ST_AsSVG(way) || '"/>'
                     WHEN _type = 'support' AND ST_GeometryType(way) = 'ST_Point' THEN
                         '<circle fill-opacity="1" fill="steelblue" stroke="royalblue" stroke-width="10" r="20" ' || ST_AsSVG(way) || '/>'
                     END
@@ -91,6 +91,9 @@ END;
 $$ LANGUAGE plpgsql;
 \set QUIET 0
 
+
+
+
 \set QUIET 1
 -- this function will implement the corner-cut algorithm
 DROP FUNCTION pseudo_parcel(integer, integer);
@@ -98,13 +101,16 @@ CREATE OR REPLACE FUNCTION pseudo_parcel(p_uid integer, area integer) RETURNS vo
 DECLARE
 bbox     geometry;
 nesw     geometry;
-other    geometry;
+-- closest extreme point that is nearest to a
+qw      text;
 BEGIN
     bbox := (
+        -- get parcel boundary
         SELECT ST_ExteriorRing(ST_Envelope(way)) AS way
         FROM parcel
         WHERE gid = p_uid
     );
+
     INSERT INTO support(way) VALUES (bbox);
     nesw := (
         -- intersect the polygon ring with the
@@ -119,16 +125,33 @@ BEGIN
     INSERT INTO support(way)
     VALUES(nesw);
 
-    -- find the closest point on all of the nearby roads
-    -- that's nearest to one of the extreme boundary points.
+    -- Note: Here we need to figure out which corner we're going to cut.
+    -- We can cut one of these corners: NW,NE,SE,SW.
+    -- We decide which corner based on two-closest extreme points
+    -- to a nearby road.
+    WITH close_pair AS (
+        -- find the closest point on all of the nearby roads
+        -- that's nearest to one of the extreme boundary points.
+        SELECT
+        ST_ClosestPoint(a.way,b.way) AS on_road,
+        b.way AS on_parcel
+        FROM road a, (SELECT (ST_Dump(nesw)).geom AS way) b
+        ORDER BY ST_ClosestPoint(a.way,b.way) <-> b.way
+        LIMIT 1
+    ), other_extreme AS (
+        -- find the other extreme point close to the road point
+        SELECT
+        b.on_parcel
+        FROM close_pair a, (SELECT (ST_Dump(nesw)).geom AS on_parcel) b
+        WHERE ST_AsText(a.on_parcel) <> ST_AsText(b.on_parcel)
+        ORDER BY b.on_parcel <-> a.on_road
+    )
     INSERT INTO support(way)
-    SELECT
-    ST_MakeLine(ST_ClosestPoint(a.way,b.way), b.way)
-    FROM road a, (SELECT (ST_Dump(nesw)).geom AS way) b
-    ORDER BY ST_ClosestPoint(a.way,b.way) <-> b.way
-    LIMIT 1;
+    SELECT ST_MakeLine(a.on_road, a.on_parcel)
+    FROM close_pair a;
 
-
+    -- TODO: need to take the decision here on which
+    -- direction to sweep in
     RAISE NOTICE '%', bbox;
 END;
 $$ LANGUAGE plpgsql;
