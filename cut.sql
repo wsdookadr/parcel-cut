@@ -96,10 +96,15 @@ $$ LANGUAGE plpgsql;
 DROP FUNCTION pseudo_parcel(integer, integer);
 CREATE OR REPLACE FUNCTION pseudo_parcel(p_uid integer, area integer) RETURNS void AS $$
 DECLARE
-bbox geometry;
-nesw geometry;
+bbox     geometry;
+nesw     geometry;
+other    geometry;
 BEGIN
-    bbox := (SELECT ST_ExteriorRing(ST_Envelope(way)) AS way FROM parcel WHERE gid = p_uid);
+    bbox := (
+        SELECT ST_ExteriorRing(ST_Envelope(way)) AS way
+        FROM parcel
+        WHERE gid = p_uid
+    );
     INSERT INTO support(way) VALUES (bbox);
     nesw := (
         -- intersect the polygon ring with the
@@ -113,6 +118,16 @@ BEGIN
     );
     INSERT INTO support(way)
     VALUES(nesw);
+
+    -- find the closest point on all of the nearby roads
+    -- that's nearest to one of the extreme boundary points.
+    INSERT INTO support(way)
+    SELECT
+    ST_MakeLine(ST_ClosestPoint(a.way,b.way), b.way)
+    FROM road a, (SELECT (ST_Dump(nesw)).geom AS way) b
+    ORDER BY ST_ClosestPoint(a.way,b.way) <-> b.way
+    LIMIT 1;
+
 
     RAISE NOTICE '%', bbox;
 END;

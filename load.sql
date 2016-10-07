@@ -35,7 +35,7 @@ CREATE TEMP VIEW roads_v AS (
         ST_Distance(p.way,r.way) as dr
         FROM roads r
         ORDER BY p.way <-> r.way
-        LIMIT 60
+        LIMIT 10
     ) rn
 );
 
