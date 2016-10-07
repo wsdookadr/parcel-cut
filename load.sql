@@ -17,9 +17,9 @@ CREATE TEMP VIEW roads_v AS (
         SELECT
         osm_id, name, way
         FROM planet_osm_line
-        -- WHERE tags->highway = 'motorway'
         WHERE tags ? 'highway'
-        -- AND tags->highway IN ('motorway','trunk','primary','secondary','tertiary','residential')
+        -- AND tags->'highway' IN ('motorway','trunk','primary','secondary','tertiary','residential','unclassified','service')
+        AND tags->'highway' IN ('motorway','trunk','primary')
     )
     -- do KNN cross-join between parcels and roads
     -- to get nearby roads (rn)
@@ -35,7 +35,7 @@ CREATE TEMP VIEW roads_v AS (
         ST_Distance(p.way,r.way) as dr
         FROM roads r
         ORDER BY p.way <-> r.way
-        LIMIT 1000
+        LIMIT 60
     ) rn
 );
 
