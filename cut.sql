@@ -95,24 +95,57 @@ $$ LANGUAGE plpgsql;
 -- TODO: implement and use this function in pseudo_parcel
 -- label boundary points with indicators based on which edge of the bounding
 -- box they're on
-CREATE OR REPLACE FUNCTION get_nesw(ps geometry[]) RETURNS void AS $$
+CREATE OR REPLACE FUNCTION get_nesw(ps geometry[]) RETURNS text[] AS $$
 DECLARE
+extring   geometry;
+p         geometry;
+labels    text[];
+l         text[];
 BEGIN
     -- the way we're going to label points is as follows
     -- we're going to check whether they have YMax or YMin
     -- and add an 'N' or 'S' and then we're going to check if they have
-    -- an XMin or XMax and add an 'W' or 'E'
+    -- an XMin or XMax and add an 'W' or 'E'.
+    -- if a point is labelled with 'NW' then this means they're right on the
+    -- north-west corner of the bounding-box.
+    extring := (
+        SELECT
+        ST_ExteriorRing(ST_Envelope(ST_Collect(way)))
+        FROM
+        unnest(ps)
+    );
+
+    FOREACH p IN ARRAY ps
+    LOOP
+        l := '';
+
+        IF ST_Y(p) = ST_YMin(extring) THEN
+            l := l || 'N';
+        ELSIF ST_Y(p) = ST_YMax(extring) THEN
+            l := l || 'S';
+        END IF;
+
+        IF ST_X(p) = ST_XMin(extring) THEN
+            l := l || 'W';
+        ELSIF ST_X(p) = ST_XMax(extring) THEN
+            l := l || 'E';
+        END IF;
+
+        labels := array_append(labels, l);
+    END LOOP;
+
+    RETURN labels;
 END;
 $$ LANGUAGE plpgsql;
 
 -- this function will implement the corner-cut algorithm
 CREATE OR REPLACE FUNCTION pseudo_parcel(p_uid integer, area integer) RETURNS void AS $$
 DECLARE
-bbox    geometry;
+bbox      geometry;
 -- extreme cardinal points on the polygon boundary
-nesw    geometry[];
+boundary  geometry[];
 -- two extreme points closest to the nearest road, and the road point itself
-rc2     geometry[];
+rc2       geometry[];
 BEGIN
     bbox := (
         -- get parcel boundary
@@ -122,11 +155,10 @@ BEGIN
     );
     INSERT INTO support(way) VALUES (bbox);
 
-    -- identify extreme boundary points.
-    -- in NESW we have all the extreme points on the boundary
-    -- sorted by azimuth, so nesw[1] is north, nesw[2] is east
-    -- nesw[3] is south, nesw[4] is west.
-    nesw := (
+    -- identify extreme boundary points and sort them by azimuth
+    -- relative to the centroid of the bbox.
+    -- (so they will be clock-wise sorted)
+    boundary := (
         WITH int AS (
             -- intersect the polygon ring with the
             -- envelope(bounding-box) ring to get the boundary
@@ -160,11 +192,11 @@ BEGIN
         FROM sorted_cw
     );
 
-    INSERT INTO support(way) SELECT unnest(nesw);
+    INSERT INTO support(way) SELECT unnest(boundary);
 
     INSERT INTO support(way)
     SELECT ST_ConvexHull(ST_Collect(way))
-    FROM (SELECT unnest(nesw) AS way) a;
+    FROM (SELECT unnest(boundary) AS way) a;
 
     -- Note: Here we need to figure out which corner we're going to cut.
     -- We can cut one of these corners: NW,NE,SE,SW.
@@ -177,14 +209,14 @@ BEGIN
             SELECT
             ST_ClosestPoint(a.way,b.way) AS on_road,
             b.way AS on_parcel
-            FROM road a, (SELECT way FROM unnest(nesw) m(way)) b
+            FROM road a, (SELECT way FROM unnest(boundary) m(way)) b
             ORDER BY ST_ClosestPoint(a.way,b.way) <-> b.way
             LIMIT 1
         ), other_extreme AS (
             -- find the other extreme point close to the road point
             SELECT
             b.on_parcel
-            FROM close_pair a, (SELECT way AS on_parcel FROM unnest(nesw) m(way)) b
+            FROM close_pair a, (SELECT way AS on_parcel FROM unnest(boundary) m(way)) b
             WHERE ST_AsText(a.on_parcel) <> ST_AsText(b.on_parcel)
             ORDER BY b.on_parcel <-> a.on_road
             LIMIT 1
@@ -197,7 +229,12 @@ BEGIN
     INSERT INTO support(way) SELECT ST_MakeLine(rc2[1], rc2[3]);
     INSERT INTO support(way) SELECT ST_MakeLine(rc2[2], rc2[3]);
 
-    IF   (rc2[1] = nesw[4] AND rc2[2] = nesw[3]) OR (rc2[1] = nesw[3] AND rc2[2] = nesw[4]) THEN
+
+    -- TODO: call get_nesw to get labels for boundary points
+    -- distinguish between multiple cases. these cases come up
+    -- due to position of the nearby-road relative to the boundary points.
+    -- the goal is to decide which corner we're going to cut: NW,NE,SE or SW.
+    IF   (rc2[1] = boundary[4] AND rc2[2] = boundary[3]) OR (rc2[1] = boundary[3] AND rc2[2] = boundary[4]) THEN
         RAISE NOTICE 'north-west cut';
     END IF;
 
