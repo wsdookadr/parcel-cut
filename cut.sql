@@ -14,7 +14,6 @@ SET search_path = public, plan;
 
 \set QUIET 1
 -- this function draws all available parcels as a SVG
-DROP FUNCTION parcels_draw();
 CREATE OR REPLACE FUNCTION parcels_draw() RETURNS text AS $$
 DECLARE
 retval text;
@@ -91,14 +90,22 @@ BEGIN
     RETURN retval;
 END;
 $$ LANGUAGE plpgsql;
-\set QUIET 0
 
 
+-- TODO: implement and use this function in pseudo_parcel
+-- label boundary points with indicators based on which edge of the bounding
+-- box they're on
+CREATE OR REPLACE FUNCTION get_nesw(ps geometry[]) RETURNS void AS $$
+DECLARE
+BEGIN
+    -- the way we're going to label points is as follows
+    -- we're going to check whether they have YMax or YMin
+    -- and add an 'N' or 'S' and then we're going to check if they have
+    -- an XMin or XMax and add an 'W' or 'E'
+END;
+$$ LANGUAGE plpgsql;
 
-
-\set QUIET 1
 -- this function will implement the corner-cut algorithm
-DROP FUNCTION pseudo_parcel(integer, integer);
 CREATE OR REPLACE FUNCTION pseudo_parcel(p_uid integer, area integer) RETURNS void AS $$
 DECLARE
 bbox    geometry;
@@ -115,6 +122,7 @@ BEGIN
     );
     INSERT INTO support(way) VALUES (bbox);
 
+    -- identify extreme boundary points.
     -- in NESW we have all the extreme points on the boundary
     -- sorted by azimuth, so nesw[1] is north, nesw[2] is east
     -- nesw[3] is south, nesw[4] is west.
@@ -139,14 +147,14 @@ BEGIN
         ), center AS (
             -- get centroid of polygon defined by N,E,S,W extreme points
             SELECT
-            ST_Centroid(ST_ConvexHull(ST_Collect(p))) AS c
+            ST_Centroid(ST_ExteriorRing(ST_Envelope(ST_Collect(p)))) AS c
             FROM unpacked
         ), sorted_cw AS (
             -- sort extreme points clock-wise
             SELECT
             a.p AS way
             FROM unpacked a, center b
-            ORDER BY -ST_Azimuth(b.c, a.p)
+            ORDER BY ST_Azimuth(b.c, a.p)
         )
         SELECT array_agg(way)
         FROM sorted_cw
@@ -186,21 +194,12 @@ BEGIN
         FROM close_pair a, other_extreme b
     );
 
-
     INSERT INTO support(way) SELECT ST_MakeLine(rc2[1], rc2[3]);
     INSERT INTO support(way) SELECT ST_MakeLine(rc2[2], rc2[3]);
 
-    IF  rc2[2] = nesw[2] THEN
-        RAISE NOTICE 'north cut';
+    IF   (rc2[1] = nesw[4] AND rc2[2] = nesw[3]) OR (rc2[1] = nesw[3] AND rc2[2] = nesw[4]) THEN
+        RAISE NOTICE 'north-west cut';
     END IF;
-
-    -- INSERT INTO support(way)
-    -- SELECT ST_MakeLine(a.on_road, a.on_parcel)
-    -- FROM close_pair a
-    -- UNION
-    -- SELECT ST_MakeLine(a.on_road, b.on_parcel)
-    -- FROM close_pair a, other_extreme b;
-
 
     -- TODO: need to take the decision here on which
     -- direction to sweep in
