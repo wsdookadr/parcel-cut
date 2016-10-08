@@ -100,7 +100,7 @@ DECLARE
 extring   geometry;
 p         geometry;
 labels    text[];
-l         text[];
+l         text;
 BEGIN
     -- the way we're going to label points is as follows
     -- we're going to check whether they have YMax or YMin
@@ -108,30 +108,31 @@ BEGIN
     -- an XMin or XMax and add an 'W' or 'E'.
     -- if a point is labelled with 'NW' then this means they're right on the
     -- north-west corner of the bounding-box.
+    labels := ARRAY[]::text[];
     extring := (
         SELECT
         ST_ExteriorRing(ST_Envelope(ST_Collect(way)))
         FROM
-        unnest(ps)
+        unnest(ps) m(way)
     );
 
     FOREACH p IN ARRAY ps
     LOOP
         l := '';
 
-        IF ST_Y(p) = ST_YMin(extring) THEN
+        IF    ST_Y(p) = ST_YMax(extring) THEN
             l := l || 'N';
-        ELSIF ST_Y(p) = ST_YMax(extring) THEN
+        ELSIF ST_Y(p) = ST_YMin(extring) THEN
             l := l || 'S';
         END IF;
 
-        IF ST_X(p) = ST_XMin(extring) THEN
+        IF    ST_X(p) = ST_XMin(extring) THEN
             l := l || 'W';
         ELSIF ST_X(p) = ST_XMax(extring) THEN
             l := l || 'E';
         END IF;
 
-        labels := array_append(labels, l);
+        labels := ARRAY[l]::text[] || labels;
     END LOOP;
 
     RETURN labels;
@@ -146,6 +147,7 @@ bbox      geometry;
 boundary  geometry[];
 -- two extreme points closest to the nearest road, and the road point itself
 rc2       geometry[];
+nesw      text[];
 BEGIN
     bbox := (
         -- get parcel boundary
@@ -228,6 +230,9 @@ BEGIN
 
     INSERT INTO support(way) SELECT ST_MakeLine(rc2[1], rc2[3]);
     INSERT INTO support(way) SELECT ST_MakeLine(rc2[2], rc2[3]);
+
+    nesw := get_nesw(boundary);
+    RAISE NOTICE '%', nesw;
 
 
     -- TODO: call get_nesw to get labels for boundary points
