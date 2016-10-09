@@ -188,7 +188,9 @@ BEGIN
         tmid    := (tlow + thigh)/2;
         -- trial a new position of the cut
         tline   := ST_Translate(cutline,0,-tmid);
-        -- split with horizontal line, get two polygons back 
+
+        -- split with horizontal line, get two polygons back
+        -- sort them in north-to-south order
         tsplit  := (
             SELECT
             array_agg(b.piece)
@@ -384,7 +386,6 @@ BEGIN
 
     bwidth  := bxmax - bxmin;
     bheight := bymax - bymin;
-
     RAISE NOTICE '%', bwidth;
     RAISE NOTICE '%', bheight;
 
