@@ -318,6 +318,7 @@ BEGIN
     titer := 0;
     tlow  := 0;
     thigh := bheight;
+
     WHILE tlow < thigh LOOP
         -- RAISE NOTICE 'loop';
         tmid    := (tlow + thigh)/2;
@@ -344,18 +345,28 @@ BEGIN
         END IF;
 
         RAISE NOTICE 'area above split: %', tarea;
-        RAISE NOTICE 'delta: %', ABS(tarea-area);
+        IF ABS(tarea - area) < 0.001 THEN
+            RAISE NOTICE 'found split with reasonably close area';
+            RAISE NOTICE 'delta for split: %', ABS(tarea-area);
+            EXIT;
+        END IF;
         
-        IF ABS(tarea - area) < 0.001 OR titer > 1000 THEN
+        IF titer > 70 THEN
+            RAISE NOTICE 'exceeded search iterations';
             EXIT;
         END IF;
 
         titer := titer + 1;
     END LOOP;
 
+    INSERT INTO support(way) SELECT tline;
+
 END;
 $$ LANGUAGE plpgsql;
 \set QUIET 0
 
-SELECT pseudo_parcel(1,3000.0);
+SELECT pseudo_parcel(1,30000.0);
 SELECT parcels_draw();
+
+
+
