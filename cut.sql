@@ -147,25 +147,45 @@ $$ LANGUAGE plpgsql;
 -- this function will implement the corner-cut algorithm
 CREATE OR REPLACE FUNCTION pseudo_parcel(p_uid integer, area integer) RETURNS void AS $$
 DECLARE
-bbox      geometry;
+bbox       geometry;
 -- extreme cardinal points on the polygon boundary
-boundary  geometry[];
+boundary   geometry[];
 -- labels for boundary points
-nesw      text[];
+nesw       text[];
 -- two extreme points closest to the nearest road, and the road point
-rc2       geometry[];
+rc2        geometry[];
 -- labels for near-road points
-lrc       text[];
+lrc        text[];
+
 -- width of bounding box;
-bwidth    float;
+bwidth     float;
 -- length of bounding box;
-bheight   float;
+bheight    float;
+
 -- xmin,xmax,ymin,ymax for bbox
-bxmin     float;
-bxmax     float;
-bymin     float;
-bymax     float;
+bxmin      float;
+bxmax      float;
+bymin      float;
+bymax      float;
+
+-- area of the input polygon
+p_area     float;
+-- green line and red line (sweep lines)
+gline      geometry; 
+rline      geometry;
+
+-- trial cut area
+tarea      float;
+-- trial cursor will be between [0,bwidth] or between [0,bheight]
+tcursor    float;
+-- trial sweep line
+tline      geometry;
 BEGIN
+    p_area := (SELECT ST_Area(way) FROM parcel WHERE gid = p_uid);
+
+    RAISE NOTICE 'original area: %', p_area;
+
+
     bbox := (
         -- get parcel boundary
         SELECT ST_ExteriorRing(ST_Envelope(way)) AS way
@@ -284,6 +304,15 @@ BEGIN
     -- bbox horizontal and ST_Translate it from 0 to bheight
     -- (analogous situation for vertical sweep-line).
 
+    -- north-south sweep line
+    gline := ST_SetSRID(ST_MakeLine(ST_MakePoint(bxmin,bymax), ST_MakePoint(bxmax,bymax)), 900913);
+    tcursor := 0;
+    WHILE tcursor <= bheight LOOP
+        RAISE NOTICE 'loop';
+        tcursor := tcursor + (bheight/100);
+        tline := ST_Translate(gline,0,-tcursor);
+        INSERT INTO support(way) SELECT tline;
+    END LOOP;
 
 END;
 $$ LANGUAGE plpgsql;
