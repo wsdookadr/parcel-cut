@@ -106,8 +106,9 @@ BEGIN
     -- we're going to check whether they have YMax or YMin
     -- and add an 'N' or 'S' and then we're going to check if they have
     -- an XMin or XMax and add an 'W' or 'E'.
-    -- if a point is labelled with 'NW' then this means they're right on the
-    -- north-west corner of the bounding-box.
+    --
+    -- for example, the label 'NW' means the point is on both on the north
+    -- and west edge of the bbox. this means it's the NW corner.
     labels := ARRAY[]::text[];
     extring := (
         SELECT
@@ -138,7 +139,6 @@ BEGIN
     RETURN labels;
 END;
 $$ LANGUAGE plpgsql;
-
 
 -- input:
 -- receives as parameters the initial polygon, the desired area,
@@ -397,6 +397,4 @@ $$ LANGUAGE plpgsql;
 
 SELECT pseudo_parcel(1,30000.0);
 SELECT parcels_draw();
-
-
 
