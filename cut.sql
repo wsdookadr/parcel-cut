@@ -139,10 +139,103 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+
+-- input:
+-- receives as parameters the initial polygon, the desired area,
+-- the x/y min/max of the bbox for the polygon.
+--
+-- output:
+-- returns the cut line
+--
+-- this cut is applied when the road is closest to the north-west corner
+-- and therefore the NW corner will be cut. the sweep line will start in the
+-- north and will travel towards south to find the required area above it.
+--
+CREATE OR REPLACE FUNCTION nw_cut(poly geometry, area float, bxmin float, bxmax float, bymin float, bymax float) RETURNS geometry AS $$
+DECLARE
+-- width of bounding box;
+bwidth     float;
+-- length of bounding box;
+bheight    float;
+-- trial cursor will be between [0,bwidth] or between [0,bheight]
+tlow    float;
+tmid    float;
+thigh   float;
+-- trial cut area
+tarea      float;
+-- trial sweep line
+tline   geometry;
+-- tsplit
+tsplit  geometry[];
+-- iteration number
+titer   integer;
+cutline   geometry; 
+BEGIN
+    bwidth  := bxmax - bxmin;
+    bheight := bymax - bymin;
+
+    -- setting up the sweep line bsearch.
+    -- we're looking for a cut between [0, bheight]
+    -- (analogous situation for vertical sweep-line).
+
+    -- north-south sweep line (this is a horizontal line that travels in north-south direction)
+    cutline := ST_SetSRID(ST_MakeLine(ST_MakePoint(bxmin,bymax), ST_MakePoint(bxmax,bymax)), 900913);
+    titer := 0;
+    tlow  := 0;
+    thigh := bheight;
+    WHILE tlow < thigh LOOP
+        -- RAISE NOTICE 'loop';
+        tmid    := (tlow + thigh)/2;
+        -- trial a new position of the cut
+        tline   := ST_Translate(cutline,0,-tmid);
+        -- split with horizontal line, get two polygons back 
+        tsplit  := (
+            SELECT
+            array_agg(b.piece)
+            FROM (
+                SELECT 
+                a.piece
+                FROM (
+                    SELECT ((ST_Dump((ST_Split(poly, tline)))).geom) AS piece
+                ) a
+                ORDER BY ST_YMax(piece) DESC
+            ) b
+        );
+        tarea := ST_Area(tsplit[1]);
+
+        -- re-adjust the range we're searching for the split
+        -- depending on overshot/undershot relatve to the target area.
+        IF tarea > area THEN
+            -- overshot  the target area
+            thigh := tmid;
+        ELSIF tarea < area THEN
+            -- undershot the target area
+            tlow  := tmid;
+        END IF;
+
+        RAISE NOTICE 'area above split: %', tarea;
+        IF ABS(tarea - area) < 0.001 THEN
+            RAISE NOTICE 'found split with reasonably close area';
+            RAISE NOTICE 'delta for split: %', ABS(tarea-area);
+            EXIT;
+        END IF;
+        
+        IF titer > 70 THEN
+            RAISE NOTICE 'exceeded search iterations';
+            RETURN NULL;
+        END IF;
+
+        titer := titer + 1;
+    END LOOP;
+
+    RETURN tline;
+END;
+$$ LANGUAGE plpgsql;
+
+
 -- TODO: remove azimuth ordering because it's not required.
 -- TODO: handle g1 <-> g2 distances and closest-points where both
 --       geometries can be lines.
-
 
 -- this function will implement the corner-cut algorithm
 CREATE OR REPLACE FUNCTION pseudo_parcel(p_uid integer, area float) RETURNS void AS $$
@@ -172,22 +265,9 @@ bymax      float;
 
 -- area of the input polygon
 p_area     float;
--- green line and red line (sweep lines)
-gline      geometry; 
-rline      geometry;
 
--- trial cursor will be between [0,bwidth] or between [0,bheight]
-tlow    float;
-tmid    float;
-thigh   float;
--- trial cut area
-tarea      float;
--- trial sweep line
-tline   geometry;
--- tsplit
-tsplit  geometry[];
--- iteration number
-titer   integer;
+-- cut line
+cut        geometry;
 BEGIN
     poly   := (SELECT way FROM parcel WHERE gid = p_uid);
     p_area := ST_Area(poly);
@@ -308,62 +388,9 @@ BEGIN
     RAISE NOTICE '%', bwidth;
     RAISE NOTICE '%', bheight;
 
-    -- setting up the sweep line bsearch.
-    -- we're looking for a cut between [0, bheight]
-    -- (analogous situation for vertical sweep-line).
+    cut := nw_cut(poly,area,bxmin,bxmax,bymin,bymax);
 
-    -- north-south sweep line (this is a horizontal line that travels in north-south direction)
-    gline := ST_SetSRID(ST_MakeLine(ST_MakePoint(bxmin,bymax), ST_MakePoint(bxmax,bymax)), 900913);
-    titer := 0;
-    tlow  := 0;
-    thigh := bheight;
-    WHILE tlow < thigh LOOP
-        -- RAISE NOTICE 'loop';
-        tmid    := (tlow + thigh)/2;
-        -- trial a new position of the cut
-        tline   := ST_Translate(gline,0,-tmid);
-        -- split with horizontal line, get two polygons back 
-        tsplit  := (
-            SELECT
-            array_agg(b.piece)
-            FROM (
-                SELECT 
-                a.piece
-                FROM (
-                    SELECT ((ST_Dump((ST_Split(poly, tline)))).geom) AS piece
-                ) a
-                ORDER BY ST_YMax(piece) DESC
-            ) b
-        );
-        tarea := ST_Area(tsplit[1]);
-
-        -- re-adjust the range we're searching for the split
-        -- depending on overshot/undershot relatve to the target area.
-        IF tarea > area THEN
-            -- overshot  the target area
-            thigh := tmid;
-        ELSIF tarea < area THEN
-            -- undershot the target area
-            tlow  := tmid;
-        END IF;
-
-        RAISE NOTICE 'area above split: %', tarea;
-        IF ABS(tarea - area) < 0.001 THEN
-            RAISE NOTICE 'found split with reasonably close area';
-            RAISE NOTICE 'delta for split: %', ABS(tarea-area);
-            EXIT;
-        END IF;
-        
-        IF titer > 70 THEN
-            RAISE NOTICE 'exceeded search iterations';
-            EXIT;
-        END IF;
-
-        titer := titer + 1;
-    END LOOP;
-
-    INSERT INTO support(way) SELECT tline;
-
+    INSERT INTO support(way) SELECT cut;
 END;
 $$ LANGUAGE plpgsql;
 \set QUIET 0
