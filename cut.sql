@@ -248,9 +248,9 @@ BEGIN
 
     INSERT INTO support(way) SELECT unnest(boundary);
 
-    INSERT INTO support(way)
-    SELECT ST_ConvexHull(ST_Collect(way))
-    FROM (SELECT unnest(boundary) AS way) a;
+    -- INSERT INTO support(way)
+    -- SELECT ST_ConvexHull(ST_Collect(way))
+    -- FROM (SELECT unnest(boundary) AS way) a;
 
     -- Note: Here we need to figure out which corner we're going to cut.
     -- We can cut one of these corners: NW,NE,SE,SW.
@@ -280,8 +280,8 @@ BEGIN
         FROM close_pair a, other_extreme b
     );
 
-    INSERT INTO support(way) SELECT ST_MakeLine(rc2[1], rc2[3]);
-    INSERT INTO support(way) SELECT ST_MakeLine(rc2[2], rc2[3]);
+    -- INSERT INTO support(way) SELECT ST_MakeLine(rc2[1], rc2[3]);
+    -- INSERT INTO support(way) SELECT ST_MakeLine(rc2[2], rc2[3]);
 
     nesw := get_nesw(boundary);
     RAISE NOTICE '%', nesw;
@@ -309,8 +309,7 @@ BEGIN
     RAISE NOTICE '%', bheight;
 
     -- setting up the sweep line bsearch.
-    -- in order to create the sweeping line, we just get a copy of the
-    -- bbox north edge and ST_Translate it from 0 to bheight
+    -- we're looking for a cut between [0, bheight]
     -- (analogous situation for vertical sweep-line).
 
     -- north-south sweep line (this is a horizontal line that travels in north-south direction)
@@ -318,10 +317,10 @@ BEGIN
     titer := 0;
     tlow  := 0;
     thigh := bheight;
-
     WHILE tlow < thigh LOOP
         -- RAISE NOTICE 'loop';
         tmid    := (tlow + thigh)/2;
+        -- trial a new position of the cut
         tline   := ST_Translate(gline,0,-tmid);
         -- split with horizontal line, get two polygons back 
         tsplit  := (
@@ -338,9 +337,13 @@ BEGIN
         );
         tarea := ST_Area(tsplit[1]);
 
+        -- re-adjust the range we're searching for the split
+        -- depending on overshot/undershot relatve to the target area.
         IF tarea > area THEN
+            -- overshot  the target area
             thigh := tmid;
         ELSIF tarea < area THEN
+            -- undershot the target area
             tlow  := tmid;
         END IF;
 
