@@ -145,8 +145,10 @@ $$ LANGUAGE plpgsql;
 
 
 -- this function will implement the corner-cut algorithm
-CREATE OR REPLACE FUNCTION pseudo_parcel(p_uid integer, area integer) RETURNS void AS $$
+CREATE OR REPLACE FUNCTION pseudo_parcel(p_uid integer, area float) RETURNS void AS $$
 DECLARE
+-- original polygon
+poly       geometry;
 bbox       geometry;
 -- extreme cardinal points on the polygon boundary
 boundary   geometry[];
@@ -174,14 +176,21 @@ p_area     float;
 gline      geometry; 
 rline      geometry;
 
+-- trial cursor will be between [0,bwidth] or between [0,bheight]
+tlow    float;
+tmid    float;
+thigh   float;
 -- trial cut area
 tarea      float;
--- trial cursor will be between [0,bwidth] or between [0,bheight]
-tcursor    float;
 -- trial sweep line
-tline      geometry;
+tline   geometry;
+-- tsplit
+tsplit  geometry[];
+-- iteration number
+titer   integer;
 BEGIN
-    p_area := (SELECT ST_Area(way) FROM parcel WHERE gid = p_uid);
+    poly   := (SELECT way FROM parcel WHERE gid = p_uid);
+    p_area := ST_Area(poly);
 
     RAISE NOTICE 'original area: %', p_area;
 
@@ -301,22 +310,52 @@ BEGIN
 
     -- setting up the sweep line bsearch.
     -- in order to create the sweeping line, we just get a copy of the
-    -- bbox horizontal and ST_Translate it from 0 to bheight
+    -- bbox north edge and ST_Translate it from 0 to bheight
     -- (analogous situation for vertical sweep-line).
 
-    -- north-south sweep line
+    -- north-south sweep line (this is a horizontal line that travels in north-south direction)
     gline := ST_SetSRID(ST_MakeLine(ST_MakePoint(bxmin,bymax), ST_MakePoint(bxmax,bymax)), 900913);
-    tcursor := 0;
-    WHILE tcursor <= bheight LOOP
-        RAISE NOTICE 'loop';
-        tcursor := tcursor + (bheight/100);
-        tline := ST_Translate(gline,0,-tcursor);
-        INSERT INTO support(way) SELECT tline;
+    titer := 0;
+    tlow  := 0;
+    thigh := bheight;
+    WHILE tlow < thigh LOOP
+        -- RAISE NOTICE 'loop';
+        tmid    := (tlow + thigh)/2;
+        tline   := ST_Translate(gline,0,-tmid);
+        -- split with horizontal line, get two polygons back 
+        tsplit  := (
+            SELECT
+            array_agg(b.piece)
+            FROM (
+                SELECT 
+                a.piece
+                FROM (
+                    SELECT ((ST_Dump((ST_Split(poly, tline)))).geom) AS piece
+                ) a
+                ORDER BY ST_YMax(piece) DESC
+            ) b
+        );
+        tarea := ST_Area(tsplit[1]);
+
+        IF tarea > area THEN
+            thigh := tmid;
+        ELSIF tarea < area THEN
+            tlow  := tmid;
+        END IF;
+
+        RAISE NOTICE 'area above split: %', tarea;
+        RAISE NOTICE 'delta: %', ABS(tarea-area);
+        
+        IF ABS(tarea - area) < 0.001 OR titer > 1000 THEN
+            EXIT;
+        END IF;
+
+        titer := titer + 1;
     END LOOP;
 
 END;
 $$ LANGUAGE plpgsql;
 \set QUIET 0
 
-SELECT pseudo_parcel(1,2);
+SELECT pseudo_parcel(1,3000.0);
 SELECT parcels_draw();
