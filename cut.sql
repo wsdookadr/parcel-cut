@@ -156,6 +156,15 @@ nesw      text[];
 rc2       geometry[];
 -- labels for near-road points
 lrc       text[];
+-- width of bounding box;
+bwidth    float;
+-- length of bounding box;
+bheight   float;
+-- xmin,xmax,ymin,ymax for bbox
+bxmin     float;
+bxmax     float;
+bymin     float;
+bymax     float;
 BEGIN
     bbox := (
         -- get parcel boundary
@@ -248,23 +257,34 @@ BEGIN
     nesw := get_nesw(boundary);
     RAISE NOTICE '%', nesw;
 
-    lrc := (
-        SELECT
-        -- array_agg(a.l)
-        ARRAY_AGG(3)
-        FROM unnest(nesw) a(l), unnest(boundary) b(w)
-        -- JOIN unnest(ARRAY[rc2[1],rc2[2]]) c(w) ON c.w = b.w
-    );
-    RAISE NOTICE '%', lrc;
-
     -- TODO: call get_nesw to get labels for boundary points
-    -- distinguish between multiple cases. these cases come up
-    -- due to position of the nearby-road relative to the boundary points.
-    -- the goal is to decide which corner we're going to cut: NW,NE,SE or SW.
-
-    -- TODO: need to take the decision here on which
-    -- direction to sweep in
+    --       distinguish between multiple cases. these cases come up
+    --       due to position of the nearby-road relative to the boundary points.
+    --       the goal is to decide which corner we're going to cut: NW,NE,SE or SW.
+    -- TODO: Need to take the decision here on which
+    --       direction to sweep in
+    -- TODO: Need to compute the lrc (based on boundary, nesw and rc2).
     RAISE NOTICE '%', bbox;
+
+    SELECT ST_XMax(p),ST_XMin(p),ST_YMax(p),ST_YMin(p)
+    INTO   bxmax     ,bxmin     ,bymax     ,bymin
+    FROM (
+        SELECT ST_Envelope(ST_Collect(w)) p
+        FROM  unnest(boundary) a(w)
+    ) c;
+
+    bwidth  := bxmax - bxmin;
+    bheight := bymax - bymin;
+
+    RAISE NOTICE '%', bwidth;
+    RAISE NOTICE '%', bheight;
+
+    -- setting up the sweep line bsearch.
+    -- in order to create the sweeping line, we just get a copy of the
+    -- bbox horizontal and ST_Translate it from 0 to bheight
+    -- (analogous situation for vertical sweep-line).
+
+
 END;
 $$ LANGUAGE plpgsql;
 \set QUIET 0
