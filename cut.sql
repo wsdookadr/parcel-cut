@@ -393,8 +393,8 @@ BEGIN
     RETURN true;
 END;
 $$ LANGUAGE plpgsql;
-\set QUIET 0
 
 SELECT pseudo_parcel(1,30000.0);
+\set QUIET 0
 SELECT parcels_draw();
 
