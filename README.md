@@ -4,7 +4,7 @@ that is cut is the one closest to a nearby road.
 The current version includes code to render the existing data in SVG format
 for development purposes.
 
-The algorithm is expected to work on
+The implementation is expected to work on
 - PostgreSQL >= 9.4.7
 - PostGIS    >= 2.2.2
 

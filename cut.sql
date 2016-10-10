@@ -50,10 +50,9 @@ BEGIN
             FROM d
         ), e AS (
             SELECT
-            string_agg(path,'') AS paths
+            string_agg(svg_shape,'') AS svg_shapes
             FROM (
-                -- differentiate between different types of
-                -- objects to be drawn
+                -- draw objects differently depending on their type
                 SELECT
                 (
                     CASE
@@ -68,7 +67,7 @@ BEGIN
                     WHEN _type = 'support' AND ST_GeometryType(way) = 'ST_Point' THEN
                         '<circle fill-opacity="1" fill="steelblue" stroke="royalblue" stroke-width="10" r="20" ' || ST_AsSVG(way) || '/>'
                     END
-                ) AS path
+                ) AS svg_shape
                 FROM (
                     -- unpack multi structures
                     SELECT
@@ -83,7 +82,7 @@ BEGIN
             (
                 '<html><svg width="100%" height="100%" preserveAspectRatio="" viewBox="' ||
                 concat_ws(' ', ST_XMin(d.env), ST_YMax(d.env) * -1, (ST_XMax(d.env) - ST_XMin(d.env)), (ST_YMax(d.env) - ST_YMin(d.env))) || '">' ||
-                e.paths ||
+                e.svg_shapes ||
                 '</svg></html>'
             ) AS content
             FROM e, d
@@ -97,9 +96,10 @@ END;
 $$ LANGUAGE plpgsql;
 
 
--- TODO: implement and use this function in pseudo_parcel
--- label boundary points with indicators based on which edge of the bounding
--- box they're on
+-- Returns labels for the points received as input. A label can be one of 
+-- N,E,S,W,NE,NW,SE,SW depending on their position on the bounding box. 
+-- The input points are expected to be the extreme points on the boundary
+-- of a polygon.
 CREATE OR REPLACE FUNCTION get_nesw(ps geometry[]) RETURNS text[] AS $$
 DECLARE
 extring   geometry;
@@ -225,7 +225,7 @@ BEGIN
         IF ABS(tarea - area) < 0.001 THEN
             RAISE NOTICE 'found split with reasonably close area';
             RAISE NOTICE 'delta for split: %', ABS(tarea-area);
-            EXIT;
+            RETURN NULL;
         END IF;
         
         IF titer > 70 THEN

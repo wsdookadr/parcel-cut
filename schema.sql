@@ -22,8 +22,7 @@ CREATE TABLE road (
 );
 CREATE INDEX road_index ON road USING gist (way);
 
--- we'll use this to store intermeddiary objects
--- (for development purposes)
+-- we'll use this to store different shapes for development purposes
 CREATE TABLE support (
     gid serial primary key,
     name text,

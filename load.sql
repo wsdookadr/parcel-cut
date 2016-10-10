@@ -3,6 +3,10 @@
 -- 
 -- we fill the tables `road` and `parcel` so they can later be used
 -- for testing the cutting algorithm in cut.sql
+--
+-- Note: the projection SRID used is 900913 all throughout the code because
+-- that's the same projection that we get from data imported from OSM.
+--
 SET search_path = public, plan;
 CREATE TEMP VIEW parcels_v AS (
     SELECT
@@ -41,14 +45,17 @@ CREATE TEMP VIEW roads_v AS (
     ) rn
 );
 
+-- dump the data from the views above on disk
 SET search_path = public, pg_catalog;
 \copy (SELECT name, way AS way FROM parcels_v) TO '/tmp/parcels.copy' DELIMITER ',' CSV HEADER;
 \copy (SELECT name, way AS way FROM   roads_v) TO '/tmp/roads.copy'   DELIMITER ',' CSV HEADER;
 
+-- import back the dataset from disk into the tables
 SET search_path = public, plan;
 TRUNCATE parcel RESTART IDENTITY;
 TRUNCATE road   RESTART IDENTITY;
 \copy parcel (name, way) FROM '/tmp/parcels.copy' DELIMITER ',' CSV HEADER;
 \copy road   (name, way) FROM '/tmp/roads.copy'   DELIMITER ',' CSV HEADER;
 
+-- clear this table (we're using it for development purposes).
 TRUNCATE support RESTART IDENTITY;
