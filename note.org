@@ -71,12 +71,6 @@ CROSS JOIN LATERAL (
     of the polygon in order to reduce the number of cases to be
     analyzed.
 
-#+BEGIN_COMMENT
-At the algorithm that will be described is intended primarily
-for [[https://en.wikipedia.org/wiki/Simple_polygon][simple polygons]] (it could potentially be used for weakly simple polygons
-and multipolygons).
-#+END_COMMENT
-
 We have a polygon P (also known as big parcel) and the nearest road
 R. We get the bounding box B for P and all our searches for cutting
 points/lines will be confined to B. We extract points PN,PE,PW,PS for
@@ -88,31 +82,28 @@ be done using two lines, one vertical (we'll also call this
 green-line) and one horizontal (we'll also call this the red-line). We
 want C to be of a given area A.
 
-
 Now get the closest point on R to P (we call this Q, this is the
 nearest point on the road to the polygon).
-
-#+BEGIN_COMMENT
-From here on, we convert B to a point grid G (also called a fishnet),
-and we'll search for points in G such that we can do the split we
-want.
-#+END_COMMENT
 
 We take a sweeping-line approach (this will be the green-line). This
 sweeping line will move in the opposite direction to the
 nearest-to-road-point.
 
-Because we anticipate C to have a rectangular shape, we give the
-sweeping-line a head-start of sqrt(A).
+In what follows, we assume the north-west corner needs to be cut (if
+it's a different corner, the cut search will be run, the cut line
+found and then all the shapes rotated back).
 
-The sweeping line will advance until the covered area is greater or
-equal to A, after which it will stop (if it goes beyond P's cover,
-we can conclude there is no C).
+We place an inset (a horizontal line) that will be located sqrt(A) to
+the south (relative to the north edge). The inset is located at sqrt(A)
+because we anticipate the target area to have a rectangular shape.
 
-When the green-line is in place, we now have to position the red-line
-and we can do that with the left-side fixed, and just look for the
-right spot for the right side.
+If the area above the inset (the one we aim for) is larger than our
+target, we split the polygon, take the upper half and use another
+sweeping (the red-line) line that goes from west to east, to find
+another cutting line that allows us to get to target area.
 
+If the area above the inset is insufficient (below the target area), we
+search for a better position for it, using binary search.
 * Implementation
 ** Visualization
 - [X] Need to use [[http://postgis.net/docs/ST_GeometryType.html][ST_GeometryType]] to draw parcels and roads differently
