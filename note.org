@@ -119,16 +119,21 @@ right spot for the right side.
 - [ ] Round off coordinates to save space on the SVG.
 - [ ] Refactoring
 ** Core algorithm
+- [X] Need to sort clock-wise to determine cardinal directions
+      for boundary extremes and label them. This is needed so we know
+      which corner to cut.
 - [ ] Get green-line sweep trajectory
 - [ ] Split on green-line
 - [ ] Update the cut polygon and insert the corner in the DB
-- [ ] Need to sort clock-wise to determine cardinal directions
-      for boundary extremes.
+- [ ] Need to look again at specs and write down with examples, when the red-line cut
+      will be used.
 * Other
 CREATE VIEW roads_by_type AS
 SELECT *, tags->'highway' AS road_type
 FROM planet_osm_line WHERE tags ? 'highway';
 * Progress
+  - Note taken on [2016-10-10 Lu 14:32] \\
+    Need to detail how the red-line cut works and when it's being used.
   - Note taken on [2016-10-09 Du 17:52] \\
     I noticed that the first cut would solve the problem, meaning it's able
     to find the required line.

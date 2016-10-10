@@ -368,11 +368,13 @@ BEGIN
         FROM generate_series(1,2) a(rc2_idx)
         JOIN generate_series(1,4) c(nesw_idx) ON boundary[nesw_idx] = rc2[rc2_idx]
     );
+    -- lrc now has information about which corner we're going to cut.
+    RAISE NOTICE '%', lrc;
+
+    
 
     -- INSERT INTO support(way) SELECT * FROM unnest(boundary);
     INSERT INTO support(way) SELECT * FROM unnest(rc2) a;
-
-    RAISE NOTICE '%', lrc;
 
     SELECT ST_XMax(p),ST_XMin(p),ST_YMax(p),ST_YMin(p)
     INTO   bxmax,bxmin,bymax,bymin

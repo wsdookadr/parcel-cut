@@ -18,4 +18,5 @@ Program descriptions:
 | load.sql              | Transfers some test data from OSM to the `parcel` and `road` table |
 | cut.sql               | Runs the parcel splitting algorithm                                |
 
+![alt tag](https://raw.githubusercontent.com/wsdookadr/parcel-cut/master/sample.png)
 
