@@ -145,6 +145,93 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+
+-- 
+-- split a geometry horizontally and return three geometries
+-- - split line
+-- - upper part
+-- - lower part
+--
+-- the split line will be tmid distance down from the highest point of poly
+CREATE OR REPLACE FUNCTION h_split(poly geometry, tmid float, bxmin float, bxmax float, bymin float, bymax float) RETURNS geometry[] AS $$
+DECLARE
+baseline  geometry;
+splitline geometry;
+result    geometry[];
+BEGIN
+    baseline  := ST_SetSRID(ST_MakeLine(ST_MakePoint(bxmin,bymin), ST_MakePoint(bxmax,bymin)), 900913);
+    splitline := ST_Translate(baseline,0,tmid);
+    -- split with horizontal line, we might
+    -- get back more than two pieces (depending on the shape of poly).
+    -- so we need to collect those above, and those below the cut.
+    WITH parts AS (
+        SELECT 
+        a.piece
+        FROM (
+            SELECT ((ST_Dump((ST_Split(poly, splitline)))).geom) AS piece
+        ) a
+    ), U AS (
+        SELECT
+        ST_Multi(ST_Collect(piece)) AS shape
+        FROM parts
+        WHERE ST_YMin(piece) >= bymin + tmid
+    ), D AS (
+        SELECT
+        ST_Multi(ST_Collect(piece)) AS shape
+        FROM parts
+        WHERE ST_YMin(piece)  < bymin + tmid
+    )
+    SELECT ARRAY[U.shape, D.shape] INTO result
+    FROM U,D;
+
+    RETURN (splitline || result);
+END;
+$$ LANGUAGE plpgsql;
+
+-- 
+-- split a geometry vertically and return three geometries
+-- - split line
+-- - left  part
+-- - right part
+--
+-- the split line will be tmid distance right from the leftmost point of poly
+CREATE OR REPLACE FUNCTION v_split(poly geometry, tmid float, bxmin float, bxmax float, bymin float, bymax float) RETURNS geometry[] AS $$
+DECLARE
+baseline  geometry;
+splitline geometry;
+result    geometry[];
+BEGIN
+    baseline  := ST_SetSRID(ST_MakeLine(ST_MakePoint(bxmin,bymin), ST_MakePoint(bxmin,bymax)), 900913);
+    splitline := ST_Translate(baseline,tmid,0);
+    -- split with horizontal line, we might
+    -- get back more than two pieces (depending on the shape of poly).
+    -- so we need to collect those above, and those below the cut.
+    WITH parts AS (
+        SELECT 
+        a.piece
+        FROM (
+            SELECT ((ST_Dump((ST_Split(poly, splitline)))).geom) AS piece
+        ) a
+    ), L AS (
+        SELECT
+        ST_Multi(ST_Collect(piece)) AS shape
+        FROM parts
+        WHERE ST_XMin(piece)  < bxmin + tmid
+    ), R AS (
+        SELECT
+        ST_Multi(ST_Collect(piece)) AS shape
+        FROM parts
+        WHERE ST_XMin(piece) >= bxmin + tmid
+    )
+    SELECT
+    ARRAY[L.shape, R.shape] INTO result
+    FROM L,R;
+
+    RETURN (splitline || result);
+END;
+$$ LANGUAGE plpgsql;
+
+
 -- input:
 -- receives as parameters the initial polygon, the desired area,
 -- an integer indicating which part we're searching for (1 for upper and 2 for lower)
@@ -158,7 +245,7 @@ $$ LANGUAGE plpgsql;
 -- north and will travel towards south to find the required area above it.
 --
 -- the optimal cut line is found via binary search.  
-CREATE OR REPLACE FUNCTION hcut_search(poly geometry, updown integer, area float, bxmin float, bxmax float, bymin float, bymax float) RETURNS geometry AS $$
+CREATE OR REPLACE FUNCTION hcut_search(poly geometry, updown integer, area float, bxmin float, bxmax float, bymin float, bymax float) RETURNS geometry[] AS $$
 DECLARE
 -- width of bounding box;
 bwidth    float;
@@ -170,13 +257,10 @@ tmid      float;
 thigh     float;
 -- trial cut area
 tarea     float;
--- trial sweep line
-tline     geometry;
 -- tsplit
-tsplit    geometry[];
+tsplit geometry[];
 -- iteration number
 titer     integer;
-cutline   geometry; 
 BEGIN
     bwidth  := bxmax - bxmin;
     bheight := bymax - bymin;
@@ -186,44 +270,15 @@ BEGIN
     -- (analogous situation for vertical sweep-line).
 
     -- north-south sweep line (this is a horizontal line that travels in north-south direction)
-    cutline := ST_SetSRID(ST_MakeLine(ST_MakePoint(bxmin,bymin), ST_MakePoint(bxmax,bymin)), 900913);
     titer := 0;
     tlow  := 0;
     thigh := bheight;
     WHILE tlow < thigh LOOP
         -- RAISE NOTICE 'loop';
-        tmid    := (tlow + thigh)/2;
-        -- try a new position for the cut
-        tline   := ST_Translate(cutline,0,tmid);
-
-        -- split with horizontal line, we might
-        -- get back more than two pieces (depending on the shape of poly).
-        -- so we need to collect those above, and those below the cut.
-        tsplit  := (
-            WITH parts AS (
-                SELECT 
-                a.piece
-                FROM (
-                    SELECT ((ST_Dump((ST_Split(poly, tline)))).geom) AS piece
-                ) a
-            ), U AS (
-                SELECT
-                ST_Multi(ST_Collect(piece)) AS shape
-                FROM parts
-                WHERE ST_YMin(piece) >= ST_YMin(poly) + tmid
-            ), D AS (
-                SELECT
-                ST_Multi(ST_Collect(piece)) AS shape
-                FROM parts
-                WHERE ST_YMin(piece) < ST_YMin(poly) + tmid
-            )
-            SELECT
-            ARRAY[U.shape, D.shape]
-            FROM U,D
-        );
-
-        tarea := ST_Area(tsplit[updown]);
-
+        tmid      := (tlow + thigh)/2;
+        tsplit    := h_split(poly,tmid,bxmin,bxmax,bymin,bymax);
+        -- compute selected area (add 1 to skip over the split line)
+        tarea     := ST_Area(tsplit[1 + updown]);
         -- re-adjust the range we're searching for the split
         -- depending on overshot/undershot relatve to the target area.
         IF    tarea > area AND updown = 1 THEN
@@ -240,7 +295,7 @@ BEGIN
             tlow  := tmid;
         END IF;
 
-        RAISE NOTICE 'area above split: %', tarea;
+        RAISE NOTICE 'area selected by split: %', tarea;
         IF ABS(tarea - area) < 0.001 THEN
             RAISE NOTICE 'found split with reasonably close area';
             RAISE NOTICE 'delta for split: %', ABS(tarea-area);
@@ -255,14 +310,14 @@ BEGIN
         titer := titer + 1;
     END LOOP;
 
-    RETURN tline;
+    RETURN tsplit;
 END;
 $$ LANGUAGE plpgsql;
 
 
 
 -- same as hcut_search except the cut line is vertical here
-CREATE OR REPLACE FUNCTION vcut_search(poly geometry, leftright integer, area float, bxmin float, bxmax float, bymin float, bymax float) RETURNS geometry AS $$
+CREATE OR REPLACE FUNCTION vcut_search(poly geometry, leftright integer, area float, bxmin float, bxmax float, bymin float, bymax float) RETURNS geometry[] AS $$
 DECLARE
 -- width of bounding box;
 bwidth    float;
@@ -274,13 +329,10 @@ tmid      float;
 thigh     float;
 -- trial cut area
 tarea     float;
--- trial sweep line
-tline     geometry;
 -- tsplit
 tsplit    geometry[];
 -- iteration number
 titer     integer;
-cutline   geometry; 
 BEGIN
     bwidth  := bxmax - bxmin;
     bheight := bymax - bymin;
@@ -290,7 +342,6 @@ BEGIN
     -- (analogous situation for vertical sweep-line).
 
     -- north-south sweep line (this is a horizontal line that travels in north-south direction)
-    cutline := ST_SetSRID(ST_MakeLine(ST_MakePoint(bxmin,bymin), ST_MakePoint(bxmin,bymax)), 900913);
     titer := 0;
     tlow  := 0;
     thigh := bwidth;
@@ -298,39 +349,9 @@ BEGIN
     WHILE tlow < thigh LOOP
         -- RAISE NOTICE 'loop';
         tmid    := (tlow + thigh)/2;
-        -- try a new position for the cut
-        tline   := ST_Translate(cutline,tmid,0);
-
-        -- split with horizontal line, we might
-        -- get back more than two pieces (depending on the shape of poly).
-        -- so we need to collect those on the left, and those on the right
-        -- of the cut.
-        tsplit  := (
-            WITH parts AS (
-                SELECT 
-                a.piece
-                FROM (
-                    SELECT ((ST_Dump((ST_Split(poly, tline)))).geom) AS piece
-                ) a
-            ), L AS (
-                SELECT
-                ST_Multi(ST_Collect(piece)) AS shape
-                FROM parts
-                WHERE ST_XMin(piece)  < ST_XMin(poly) + tmid
-            ), R AS (
-                SELECT
-                ST_Multi(ST_Collect(piece)) AS shape
-                FROM parts
-                WHERE ST_XMin(piece) >= ST_XMin(poly) + tmid
-            )
-            SELECT
-            ARRAY[L.shape, R.shape]
-            FROM L,R
-        );
-
-        -- RAISE NOTICE '%', array_dims(tsplit);
-
-        tarea := ST_Area(tsplit[leftright]);
+        -- compute selected area (add 1 to skip over the split line)
+        tsplit  := v_split(poly,tmid,bxmin,bxmax,bymin,bymax);
+        tarea   := ST_Area(tsplit[1 + leftright]);
 
         -- re-adjust the range we're searching for the split
         -- depending on overshot/undershot relatve to the target area.
@@ -348,7 +369,7 @@ BEGIN
             thigh := tmid;
         END IF;
 
-        RAISE NOTICE 'area above split: %', tarea;
+        RAISE NOTICE 'area selected by split: %', tarea;
         IF ABS(tarea - area) < 0.001 THEN
             RAISE NOTICE 'found split with reasonably close area';
             RAISE NOTICE 'delta for split: %', ABS(tarea-area);
@@ -362,8 +383,7 @@ BEGIN
 
         titer := titer + 1;
     END LOOP;
-
-    RETURN tline;
+    RETURN tsplit;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -410,7 +430,7 @@ bymax      float;
 p_area     float;
 
 -- cut line
-cut        geometry;
+cut_result geometry[];
 BEGIN
     poly   := (SELECT way FROM parcel WHERE gid = p_uid);
     p_area := ST_Area(poly);
@@ -498,8 +518,6 @@ BEGIN
     -- lrc now has information about which corner we're going to cut.
     RAISE NOTICE '%', lrc;
 
-    
-
     -- INSERT INTO support(way) SELECT * FROM unnest(boundary);
     INSERT INTO support(way) SELECT * FROM unnest(rc2) a;
 
@@ -513,10 +531,9 @@ BEGIN
     bwidth  := bxmax - bxmin;
     bheight := bymax - bymin;
 
-    cut := vcut_search(poly,1,target_area,bxmin,bxmax,bymin,bymax);
-
-    RAISE NOTICE '%', cut;
-    INSERT INTO support(way) SELECT cut;
+    cut_result := hcut_search(poly,1,target_area,bxmin,bxmax,bymin,bymax);
+    -- RAISE NOTICE '%', cut_result;
+    INSERT INTO support(way) SELECT cut_result[1];
 
     RETURN true;
 END;
