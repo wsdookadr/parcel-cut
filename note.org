@@ -89,9 +89,7 @@ We take a sweeping-line approach (this will be the green-line). This
 sweeping line will move in the opposite direction to the
 nearest-to-road-point.
 
-In what follows, we assume the north-west corner needs to be cut (if
-it's a different corner, the cut search will be run, the cut line
-found and then all the shapes rotated back).
+In what follows, we assume the north-west corner needs to be cut.
 
 We place an inset (a horizontal line) that will be located sqrt(A) to
 the south (relative to the north edge). The inset is located at sqrt(A)
@@ -110,6 +108,13 @@ Additional details: The way the cut search works, using the inset, is
 such that we avoid getting thin horizontal strips when our initial
 polygon is a square/rectangle (and it is expected to be a square in
 the vast majority of cases).
+
+Details about corner cases (other than NW which was covered above):
+- NE corner: green-line goes north->south and red-line goes east->west
+- SE corner: green-line goes south->north and red-line goes east->west
+- SW corner: green-line goes south->north and red-line goes west->east
+
+So the green and red-lines always move away from the corner.
 * Implementation
 ** Visualization
 - [X] Need to use [[http://postgis.net/docs/ST_GeometryType.html][ST_GeometryType]] to draw parcels and roads differently
@@ -119,11 +124,12 @@ the vast majority of cases).
 - [X] Need to sort clock-wise to determine cardinal directions
       for boundary extremes and label them. This is needed so we know
       which corner to cut.
-- [ ] Get green-line sweep trajectory
-- [ ] Split on green-line
-- [ ] Update the cut polygon and insert the corner in the DB
-- [ ] Need to look again at specs and write down with examples, when the red-line cut
+- [X] Need to look again at specs and write down with examples, when the red-line cut
       will be used.
+- [X] Get green-line sweep trajectory
+- [X] Find green-line
+- [ ] Use inset-based green-line and red-line search as described in the spec
+- [ ] Update the cut polygon and insert the corner in the DB
 * Other
 CREATE VIEW roads_by_type AS
 SELECT *, tags->'highway' AS road_type
