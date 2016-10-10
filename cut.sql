@@ -392,13 +392,13 @@ CREATE OR REPLACE FUNCTION find_cut_corner(lrc text[]) RETURNS text AS $$
 DECLARE
 rand_corner integer;
 BEGIN
-    IF     (ARRAY['N'] @> lrc AND ARRAY['W'] @> lrc) OR ARRAY['NW'] @> lrc THEN
+    IF     (ARRAY['N'] <@ lrc AND ARRAY['W'] <@ lrc) OR ARRAY['NW'] <@ lrc THEN
         RETURN 'NW';
-    ELSIF  (ARRAY['N'] @> lrc AND ARRAY['E'] @> lrc) OR ARRAY['NE'] @> lrc THEN
+    ELSIF  (ARRAY['N'] <@ lrc AND ARRAY['E'] <@ lrc) OR ARRAY['NE'] <@ lrc THEN
         RETURN 'NE';
-    ELSIF  (ARRAY['S'] @> lrc AND ARRAY['W'] @> lrc) OR ARRAY['SW'] @> lrc THEN
+    ELSIF  (ARRAY['S'] <@ lrc AND ARRAY['W'] <@ lrc) OR ARRAY['SW'] <@ lrc THEN
         RETURN 'SW';
-    ELSIF  (ARRAY['S'] @> lrc AND ARRAY['E'] @> lrc) OR ARRAY['SE'] @> lrc THEN
+    ELSIF  (ARRAY['S'] <@ lrc AND ARRAY['E'] <@ lrc) OR ARRAY['SE'] <@ lrc THEN
         RETURN 'SE';
     ELSE
         -- no definitive corner was identified.
@@ -456,7 +456,7 @@ inset_split geometry[];
 -- area of the input polygon
 p_area     float;
 -- cut line
-cut_result geometry[];
+cut_result  geometry[];
 BEGIN
     poly   := (SELECT way FROM parcel WHERE gid = p_uid);
     p_area := ST_Area(poly);
@@ -560,43 +560,31 @@ BEGIN
     cut_corner := find_cut_corner(lrc);
     RAISE NOTICE 'cut corner: %', cut_corner;
 
+    -- north-west case
     IF    cut_corner = 'NW' THEN
-        inset_split := h_split(poly,sqrt(target_area),bxmin,bxmax,bymin,bymax);
+        -- (bheight - sqrt(target_area)) is where the inset should be placed for NW corner
+        inset_split := h_split(poly,bheight - sqrt(target_area),bxmin,bxmax,bymin,bymax);
         IF ST_Area(inset_split[2]) < target_area THEN
+            -- the inset cut was insufficient so we search for a horizontal cut
+            RAISE NOTICE 'hcut_search';
             cut_result := hcut_search(poly,1,target_area,bxmin,bxmax,bymin,bymax);
+            INSERT INTO support(way) SELECT cut_result[1];
         ELSE
-            cut_result := vcut_search(poly,1,target_area,bxmin,bxmax,bymin,bymax);
-        END IF;
-    ELSIF cut_corner = 'NE' THEN 
-        inset_split := h_split(poly,sqrt(target_area),bxmin,bxmax,bymin,bymax);
-        IF ST_Area(inset_split[2]) < target_area THEN
-            cut_result := hcut_search(poly,1,target_area,bxmin,bxmax,bymin,bymax);
-        ELSE
-            cut_result := vcut_search(poly,2,target_area,bxmin,bxmax,bymin,bymax);
-        END IF;
-    ELSIF cut_corner = 'SE' THEN 
-        inset_split := h_split(poly,sqrt(target_area),bxmin,bxmax,bymin,bymax);
-        IF ST_Area(inset_split[3]) < target_area THEN
-            cut_result := hcut_search(poly,2,target_area,bxmin,bxmax,bymin,bymax);
-        ELSE
-            cut_result := vcut_search(poly,2,target_area,bxmin,bxmax,bymin,bymax);
-        END IF;
-    ELSIF cut_corner = 'SW' THEN 
-        inset_split := h_split(poly,sqrt(target_area),bxmin,bxmax,bymin,bymax);
-        IF ST_Area(inset_split[3]) < target_area THEN
-            cut_result := hcut_search(poly,2,target_area,bxmin,bxmax,bymin,bymax);
-        ELSE
-            cut_result := vcut_search(poly,1,target_area,bxmin,bxmax,bymin,bymax);
+            -- the inset produced an upper area which is beyond what we need, we're looking to cut that area further
+            -- so we're now looking for a vertical cut but applied to the upper part of the inset split (not on original poly)
+            RAISE NOTICE 'inset split + vcut_search';
+            cut_result := vcut_search(inset_split[2],1,target_area,ST_XMin(inset_split[2]),ST_XMax(inset_split[2]),ST_YMin(inset_split[2]),ST_YMax(inset_split[2]));
+            INSERT INTO support(way) SELECT inset_split[1];
+            INSERT INTO support(way) SELECT cut_result[1];
         END IF;
     END IF;
-        
-    INSERT INTO support(way) SELECT cut_result[1];
 
     RETURN true;
 END;
 $$ LANGUAGE plpgsql;
 
-SELECT pseudo_parcel(1,30000.0);
+SELECT pseudo_parcel(1,4000.0); -- triggers inset + vcut
+-- SELECT pseudo_parcel(1,30000.0); -- triggers a NW-corner cut with hcut_search
 \set QUIET 0
 SELECT parcels_draw();
 
