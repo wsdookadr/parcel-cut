@@ -244,8 +244,11 @@ $$ LANGUAGE plpgsql;
 -- TODO: The boundary array elements are usually points. However, when
 --       one of the boundary box edges is axis-parallel, the element will be a line
 --       instead. So in rc2, ST_ClosestPoint might be needed. In rc2 we want to have
---       points and not lines.
-
+--       points and not lines. So, when computing rc2, if we find lines in the 
+--       array boundary, we should use ST_ClosestPoint to get the closest point on
+--       those lines instead.
+--
+--
 -- this function will implement the corner-cut algorithm
 -- the return value will be true if the parcel was found.
 -- 
@@ -314,10 +317,9 @@ BEGIN
     -- (so they will be clock-wise sorted)
     boundary := (
         WITH int AS (
-            --
-            -- intersect the polygon ring with the
-            -- envelope(bounding-box) ring to get the boundary
-            -- extremum points (north,east,south,west).
+            -- 
+            -- intersect the polygon's exterior ring with its envelope's exterior ring
+            -- to get the boundary extremum points (north,east,south,west).
             --
             -- (the result is an ST_MultiPoint, so it will need
             --  to be unpacked in order to be used)
