@@ -103,7 +103,13 @@ sweeping (the red-line) line that goes from west to east, to find
 another cutting line that allows us to get to target area.
 
 If the area above the inset is insufficient (below the target area), we
-search for a better position for it, using binary search.
+search for a better position for it, using binary search, along the
+north-south direction.
+
+Additional details: The way the cut search works, using the inset, is
+such that we avoid getting thin horizontal strips when our initial
+polygon is a square/rectangle (and it is expected to be a square in
+the vast majority of cases).
 * Implementation
 ** Visualization
 - [X] Need to use [[http://postgis.net/docs/ST_GeometryType.html][ST_GeometryType]] to draw parcels and roads differently
