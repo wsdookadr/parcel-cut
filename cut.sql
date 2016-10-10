@@ -387,6 +387,31 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- find which corner to cut
+CREATE OR REPLACE FUNCTION find_cut_corner(lrc text[]) RETURNS text AS $$
+DECLARE
+rand_corner integer;
+BEGIN
+    IF     (ARRAY['N'] @> lrc AND ARRAY['W'] @> lrc) OR ARRAY['NW'] @> lrc THEN
+        RETURN 'NW';
+    ELSIF  (ARRAY['N'] @> lrc AND ARRAY['E'] @> lrc) OR ARRAY['NE'] @> lrc THEN
+        RETURN 'NE';
+    ELSIF  (ARRAY['S'] @> lrc AND ARRAY['W'] @> lrc) OR ARRAY['SW'] @> lrc THEN
+        RETURN 'SW';
+    ELSIF  (ARRAY['S'] @> lrc AND ARRAY['E'] @> lrc) OR ARRAY['SE'] @> lrc THEN
+        RETURN 'SE';
+    ELSE
+        -- no definitive corner was identified.
+        -- (this can happen if the two closest points to the road
+        -- were both on the same edge of the bbox)
+        -- so we pick a random corner
+        rand_corner := (random() * 3 + 1)::int;
+        RETURN (ARRAY['NW','NE','SE','SW'])[rand_corner];
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+
 
 -- TODO: The boundary array elements are usually points. However, when
 --       one of the boundary box edges is axis-parallel, the element will be a line
@@ -425,10 +450,11 @@ bxmin      float;
 bxmax      float;
 bymin      float;
 bymax      float;
-
+cut_corner  text;
+-- the result of the inset split
+inset_split geometry[];
 -- area of the input polygon
 p_area     float;
-
 -- cut line
 cut_result geometry[];
 BEGIN
@@ -531,8 +557,39 @@ BEGIN
     bwidth  := bxmax - bxmin;
     bheight := bymax - bymin;
 
-    cut_result := hcut_search(poly,1,target_area,bxmin,bxmax,bymin,bymax);
-    -- RAISE NOTICE '%', cut_result;
+    cut_corner := find_cut_corner(lrc);
+    RAISE NOTICE 'cut corner: %', cut_corner;
+
+    IF    cut_corner = 'NW' THEN
+        inset_split := h_split(poly,sqrt(target_area),bxmin,bxmax,bymin,bymax);
+        IF ST_Area(inset_split[2]) < target_area THEN
+            cut_result := hcut_search(poly,1,target_area,bxmin,bxmax,bymin,bymax);
+        ELSE
+            cut_result := vcut_search(poly,1,target_area,bxmin,bxmax,bymin,bymax);
+        END IF;
+    ELSIF cut_corner = 'NE' THEN 
+        inset_split := h_split(poly,sqrt(target_area),bxmin,bxmax,bymin,bymax);
+        IF ST_Area(inset_split[2]) < target_area THEN
+            cut_result := hcut_search(poly,1,target_area,bxmin,bxmax,bymin,bymax);
+        ELSE
+            cut_result := vcut_search(poly,2,target_area,bxmin,bxmax,bymin,bymax);
+        END IF;
+    ELSIF cut_corner = 'SE' THEN 
+        inset_split := h_split(poly,sqrt(target_area),bxmin,bxmax,bymin,bymax);
+        IF ST_Area(inset_split[3]) < target_area THEN
+            cut_result := hcut_search(poly,2,target_area,bxmin,bxmax,bymin,bymax);
+        ELSE
+            cut_result := vcut_search(poly,2,target_area,bxmin,bxmax,bymin,bymax);
+        END IF;
+    ELSIF cut_corner = 'SW' THEN 
+        inset_split := h_split(poly,sqrt(target_area),bxmin,bxmax,bymin,bymax);
+        IF ST_Area(inset_split[3]) < target_area THEN
+            cut_result := hcut_search(poly,2,target_area,bxmin,bxmax,bymin,bymax);
+        ELSE
+            cut_result := vcut_search(poly,1,target_area,bxmin,bxmax,bymin,bymax);
+        END IF;
+    END IF;
+        
     INSERT INTO support(way) SELECT cut_result[1];
 
     RETURN true;
