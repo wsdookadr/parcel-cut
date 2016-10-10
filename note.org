@@ -91,7 +91,7 @@ road point).
 In what follows, we assume the north-west corner needs to be cut.
 
 We place an inset (a horizontal line) that will be located sqrt(A) to
-the south (relative to the north edge). The inset is located at sqrt(A)
+the south (relative to the north edge). The inset is positioned there
 because we anticipate the target area to have a rectangular shape.
 
 If the area above the inset (the one we aim for) is larger than our
