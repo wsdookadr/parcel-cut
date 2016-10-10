@@ -568,14 +568,24 @@ BEGIN
             -- the inset cut was insufficient so we search for a horizontal cut
             RAISE NOTICE 'hcut_search';
             cut_result := hcut_search(poly,1,target_area,bxmin,bxmax,bymin,bymax);
-            INSERT INTO support(way) SELECT cut_result[1];
+            -- INSERT INTO support(way) SELECT cut_result[1];
+
+            -- update original parcel
+            UPDATE parcel SET way = cut_result[3] WHERE gid = p_uid;
+            -- insert the new parcel
+            INSERT INTO parcel(way, pseudo) VALUES(cut_result[2], true);
         ELSE
             -- the inset produced an upper area which is beyond what we need, we're looking to cut that area further
             -- so we're now looking for a vertical cut but applied to the upper part of the inset split (not on original poly)
             RAISE NOTICE 'inset split + vcut_search';
             cut_result := vcut_search(inset_split[2],1,target_area,ST_XMin(inset_split[2]),ST_XMax(inset_split[2]),ST_YMin(inset_split[2]),ST_YMax(inset_split[2]));
-            INSERT INTO support(way) SELECT inset_split[1];
-            INSERT INTO support(way) SELECT cut_result[1];
+            -- INSERT INTO support(way) SELECT inset_split[1];
+            -- INSERT INTO support(way) SELECT cut_result[1];
+
+            -- update the original parcel
+            UPDATE parcel SET way = ST_Union(inset_split[3], cut_result[3]) WHERE gid = p_uid;
+            -- insert the new parcel 
+            INSERT INTO parcel (way, pseudo) VALUES(cut_result[2], true);
         END IF;
     END IF;
 
