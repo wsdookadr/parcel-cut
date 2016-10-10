@@ -77,17 +77,16 @@ points/lines will be confined to B. We extract points PN,PE,PW,PS for
 all extreme cardinal points.
 
 Goal: We want to cut a corner C (also called subdivision) from P that
-contains the nearest-to-road point as one of its edges. The cut will
-be done using two lines, one vertical (we'll also call this
-green-line) and one horizontal (we'll also call this the red-line). We
-want C to be of a given area A.
+contains the nearest-to-road point. The cut will be done using two
+lines, one horizontal (the green-line) and one vertical (the
+red-line). We want C to be of a given area A.
 
 Now get the closest point on R to P (we call this Q, this is the
 nearest point on the road to the polygon).
 
-We take a sweeping-line approach (this will be the green-line). This
-sweeping line will move in the opposite direction to the
-nearest-to-road-point.
+We'll use sweeping-lines for this. Any sweeping-lines mentioned will
+be moving away from the corner (in other words, away from the closest
+road point).
 
 In what follows, we assume the north-west corner needs to be cut.
 
