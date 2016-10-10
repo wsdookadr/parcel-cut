@@ -1,6 +1,8 @@
--- get a some polygons from the OSM data we'll use those for tests.
--- we also need to get some nearby roads.
--- we'll then run the algorithm on that data(to cut pieces from it).
+-- this program gets some land areas(polygons) from the OSM dataset
+-- and a some roads near them.
+-- 
+-- we fill the tables `road` and `parcel` so they can later be used
+-- for testing the cutting algorithm in cut.sql
 SET search_path = public, plan;
 CREATE TEMP VIEW parcels_v AS (
     SELECT
@@ -18,17 +20,17 @@ CREATE TEMP VIEW roads_v AS (
         osm_id, name, way
         FROM planet_osm_line
         WHERE tags ? 'highway'
-        -- AND tags->'highway' IN ('motorway','trunk','primary','secondary','tertiary','residential','unclassified','service')
         AND tags->'highway' IN ('motorway','trunk','primary')
     )
     -- do KNN cross-join between parcels and roads
-    -- to get nearby roads (rn)
+    -- to get nearby roads (rn), deduplicate the roads
+    -- and insert them into the `road` table.
     SELECT
     DISTINCT ON (rn.osm_id)
     rn.name, rn.way
     FROM parcels_v p
     CROSS JOIN LATERAL (
-        -- get the 5 closest roads to each parcel
+        -- get 10 closest roads to each parcel
         SELECT
         *,
         -- distance to road

@@ -1,17 +1,21 @@
-So far, this setup assumes that there is a database called dbgeo1 loaded
-with OSM data for the city of Bucharest. This is for test purposes.
-
-This is a very early version, where we create a separate schema called
-"plan" (which is separate from the regular schema of the database).
-We'll use this schema to create two tables, one for parcels, the other
-for roads.  We'll transfer some limited amount of data from OSM to
-populate tables in the "plan" schema.
-
-The current version includes code to render the existing polygons in
-the parcel table.
+This is an algorithm for land subdivision under certain constraints.
+The goal is to cut a corner of a given area from a polygon. The corner
+that is cut is the one closest to a nearby road.
+The current version includes code to render the existing data in SVG format
+for development purposes.
 
 The algorithm is expected to work on
 - PostgreSQL >= 9.4.7
 - PostGIS    >= 2.2.2
 
-For the current version, we'll use test data from OSM in Bucharest.
+You can find some test data for this in `data/plan.dump`.
+
+Program descriptions:
+
+| Program               | Usage                                                              |
+| --------------------- | ------------------------------------------------------------------ |
+| schema.sql            | Creates tables to hold the data                                    |
+| load.sql              | Transfers some test data from OSM to the `parcel` and `road` table |
+| cut.sql               | Runs the parcel splitting algorithm                                |
+
+

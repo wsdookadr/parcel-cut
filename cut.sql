@@ -1,6 +1,6 @@
 -- this block will set some flags, and supress unneeded output.
--- this is the workbench program where most development
--- will be carried out and we want to output an SVG from here.
+-- this is a visualization that aids in development, it renders
+-- a number of different shapes (roads, land areas) in SVG format.
 \set QUIET 1
 \a
 -- turn off footer
@@ -12,8 +12,13 @@
 SET search_path = public, plan;
 \set QUIET 0
 
+
+
+
 \set QUIET 1
--- this function draws all available parcels as a SVG
+-- this function draws all the shapes in the support, parcel and road tables
+-- it differentiates between some shapes in order to better identify them in
+-- the SVG output
 CREATE OR REPLACE FUNCTION parcels_draw() RETURNS text AS $$
 DECLARE
 retval text;
@@ -151,6 +156,7 @@ $$ LANGUAGE plpgsql;
 -- and therefore the NW corner will be cut. the sweep line will start in the
 -- north and will travel towards south to find the required area above it.
 --
+-- the optimal cut line is found via binary search.  
 CREATE OR REPLACE FUNCTION nw_cut(poly geometry, area float, bxmin float, bxmax float, bymin float, bymax float) RETURNS geometry AS $$
 DECLARE
 -- width of bounding box;
@@ -235,8 +241,10 @@ END;
 $$ LANGUAGE plpgsql;
 
 
--- TODO: handle g1 <-> g2 distances and closest-points where both
---       geometries can be lines.
+-- TODO: The boundary array elements are usually points. However, when
+--       one of the boundary box edges is axis-parallel, the element will be a line
+--       instead. So in rc2, ST_ClosestPoint might be needed. In rc2 we want to have
+--       points and not lines.
 
 -- this function will implement the corner-cut algorithm
 -- the return value will be true if the parcel was found.
