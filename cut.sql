@@ -239,7 +239,11 @@ $$ LANGUAGE plpgsql;
 --       geometries can be lines.
 
 -- this function will implement the corner-cut algorithm
-CREATE OR REPLACE FUNCTION pseudo_parcel(p_uid integer, area float) RETURNS void AS $$
+-- the return value will be true if the parcel was found.
+-- 
+-- it will return NULL if there was an error and false if
+-- a partition was not found.
+CREATE OR REPLACE FUNCTION pseudo_parcel(p_uid integer, area float) RETURNS boolean AS $$
 DECLARE
 -- original polygon
 poly       geometry;
@@ -272,6 +276,19 @@ cut        geometry;
 BEGIN
     poly   := (SELECT way FROM parcel WHERE gid = p_uid);
     p_area := ST_Area(poly);
+
+    IF poly IS NULL THEN
+        -- the input polygon was not found in the polygon table
+        RAISE NOTICE 'input polygon not found';
+        RETURN NULL;
+    END IF;
+
+    IF p_area < area THEN
+        -- the input polygon is too small and we won't be able to
+        -- to find a parcel with the required area.
+        RAISE NOTICE 'the polygon area is too small';
+        RETURN false;
+    END IF;
 
     RAISE NOTICE 'original area: %', p_area;
 
@@ -362,6 +379,8 @@ BEGIN
     cut := nw_cut(poly,area,bxmin,bxmax,bymin,bymax);
 
     INSERT INTO support(way) SELECT cut;
+
+    RETURN true;
 END;
 $$ LANGUAGE plpgsql;
 \set QUIET 0
