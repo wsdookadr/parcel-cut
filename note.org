@@ -1,6 +1,61 @@
 # #+BEGIN_SRC sql :engine postgresql :dbpassword test1 :database dbgeo1 :results drawer :exports code
 # #+BEGIN_SRC sql :engine postgresql :dbpassword test1 :dbuser user :database dbgeo1 :exports code :results silent
 
+* Detailed Spec                                                     :rfc:
+  - Note taken on [2016-10-09 Du 19:06] \\
+    This spec should be updated with the part that describes
+    when the polygon should be split with just one line, and when
+    it should be split with two lines.
+    
+    There's also some details that are pending related to rotation
+    of the polygon in order to reduce the number of cases to be
+    analyzed.
+
+We have a polygon P (also known as big parcel) and the nearest road
+R. We get the bounding box B for P and all our searches for cutting
+points/lines will be confined to B. We get the points that are on the
+boundary and on the bounding box at the same time, we call these
+"extreme points" and denote them with E, and we label them with their
+cardinal direction.
+
+Goal: We want to cut a corner C (also called subdivision) from P that
+contains the nearest-to-road point. The cut will be done using two
+lines, one horizontal (the green-line) and one vertical (the
+red-line). We want C to be of a given area A.
+
+Now get the closest two points on E to R, and depending on them, we
+decide which corner to cut.
+
+We'll use sweeping-lines for this. Any sweeping-lines mentioned will
+be moving away from the corner (in other words, away from the closest
+road point).
+
+In what follows, we assume the north-west corner needs to be cut.
+
+We place an inset (a horizontal line) that will be located sqrt(A) to
+the south (relative to the north edge). The inset is positioned there
+because we anticipate the target area to have a rectangular shape.
+
+If the area above the inset (the one we aim for) is larger than our
+target, we split the polygon, take the upper half and use another
+sweeping (the red-line) line that goes from west to east, to find
+another cutting line that allows us to get to target area.
+
+If the area above the inset is insufficient (below the target area), we
+search for a better position for it, using binary search, along the
+north-south direction.
+
+Additional details: The way the cut search works, using the inset, is
+such that we avoid getting thin horizontal strips when our initial
+polygon is a square/rectangle (and it is expected to be a square in
+the vast majority of cases).
+
+Details about corner cases (other than NW which was covered above):
+- NE corner: green-line goes north->south and red-line goes east->west
+- SE corner: green-line goes south->north and red-line goes east->west
+- SW corner: green-line goes south->north and red-line goes west->east
+
+So the green and red-lines always move away from the corner.
 * Query to get test parcels                                        :for_test:
 
 #+BEGIN_SRC sql -n :engine postgresql :exports code :cmdline "-A -t -w -h localhost -d dbgeo1 -U user" :cache no
@@ -61,61 +116,6 @@ CROSS JOIN LATERAL (
 | 284325583 | Autostrada A3 București - Brașov | 91797290 | Parcul Herăstrău | 4810.48244180351 |
 | 284325584 | Autostrada A3 București - Brașov | 88337012 | Parcul Herăstrău | 4886.17496682222 |
 
-* Detailed Spec                                                     :rfc:
-  - Note taken on [2016-10-09 Du 19:06] \\
-    This spec should be updated with the part that describes
-    when the polygon should be split with just one line, and when
-    it should be split with two lines.
-    
-    There's also some details that are pending related to rotation
-    of the polygon in order to reduce the number of cases to be
-    analyzed.
-
-We have a polygon P (also known as big parcel) and the nearest road
-R. We get the bounding box B for P and all our searches for cutting
-points/lines will be confined to B. We get the points that are on the
-boundary and on the bounding box at the same time, we call these
-"extreme points" and denote them with E, and we label them with their
-cardinal direction.
-
-Goal: We want to cut a corner C (also called subdivision) from P that
-contains the nearest-to-road point. The cut will be done using two
-lines, one horizontal (the green-line) and one vertical (the
-red-line). We want C to be of a given area A.
-
-Now get the closest two points on E to R, and depending on them, we
-decide which corner to cut.
-
-We'll use sweeping-lines for this. Any sweeping-lines mentioned will
-be moving away from the corner (in other words, away from the closest
-road point).
-
-In what follows, we assume the north-west corner needs to be cut.
-
-We place an inset (a horizontal line) that will be located sqrt(A) to
-the south (relative to the north edge). The inset is positioned there
-because we anticipate the target area to have a rectangular shape.
-
-If the area above the inset (the one we aim for) is larger than our
-target, we split the polygon, take the upper half and use another
-sweeping (the red-line) line that goes from west to east, to find
-another cutting line that allows us to get to target area.
-
-If the area above the inset is insufficient (below the target area), we
-search for a better position for it, using binary search, along the
-north-south direction.
-
-Additional details: The way the cut search works, using the inset, is
-such that we avoid getting thin horizontal strips when our initial
-polygon is a square/rectangle (and it is expected to be a square in
-the vast majority of cases).
-
-Details about corner cases (other than NW which was covered above):
-- NE corner: green-line goes north->south and red-line goes east->west
-- SE corner: green-line goes south->north and red-line goes east->west
-- SW corner: green-line goes south->north and red-line goes west->east
-
-So the green and red-lines always move away from the corner.
 * Implementation
 ** Visualization
 - [X] Need to use [[http://postgis.net/docs/ST_GeometryType.html][ST_GeometryType]] to draw parcels and roads differently
@@ -136,6 +136,8 @@ CREATE VIEW roads_by_type AS
 SELECT *, tags->'highway' AS road_type
 FROM planet_osm_line WHERE tags ? 'highway';
 * Progress
+  - Note taken on [2016-10-10 Lu 18:26] \\
+    Refined spec and simplified some parts of the code.
   - Note taken on [2016-10-10 Lu 14:32] \\
     Need to detail how the red-line cut works and when it's being used.
   - Note taken on [2016-10-09 Du 17:52] \\

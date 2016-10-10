@@ -69,7 +69,7 @@ BEGIN
                     END
                 ) AS svg_shape
                 FROM (
-                    -- unpack multi structures
+                    -- unpacking (for ST_Multi* structures)
                     SELECT
                     name,
                     _type,
@@ -160,21 +160,21 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION nw_cut(poly geometry, area float, bxmin float, bxmax float, bymin float, bymax float) RETURNS geometry AS $$
 DECLARE
 -- width of bounding box;
-bwidth     float;
+bwidth    float;
 -- length of bounding box;
-bheight    float;
+bheight   float;
 -- trial cursor will be between [0,bwidth] or between [0,bheight]
-tlow    float;
-tmid    float;
-thigh   float;
+tlow      float;
+tmid      float;
+thigh     float;
 -- trial cut area
-tarea      float;
+tarea     float;
 -- trial sweep line
-tline   geometry;
+tline     geometry;
 -- tsplit
-tsplit  geometry[];
+tsplit    geometry[];
 -- iteration number
-titer   integer;
+titer     integer;
 cutline   geometry; 
 BEGIN
     bwidth  := bxmax - bxmin;
@@ -192,7 +192,7 @@ BEGIN
     WHILE tlow < thigh LOOP
         -- RAISE NOTICE 'loop';
         tmid    := (tlow + thigh)/2;
-        -- trial a new position of the cut
+        -- try a new position for the cut
         tline   := ST_Translate(cutline,0,-tmid);
 
         -- split with horizontal line, get two polygons back
@@ -312,9 +312,7 @@ BEGIN
     );
     INSERT INTO support(way) VALUES (bbox);
 
-    -- identify extreme boundary points and sort them by azimuth
-    -- relative to the centroid of the bbox.
-    -- (so they will be clock-wise sorted)
+    -- get boundary extreme points
     boundary := (
         WITH int AS (
             -- 
