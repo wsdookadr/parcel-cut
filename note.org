@@ -73,16 +73,18 @@ CROSS JOIN LATERAL (
 
 We have a polygon P (also known as big parcel) and the nearest road
 R. We get the bounding box B for P and all our searches for cutting
-points/lines will be confined to B. We extract points PN,PE,PW,PS for
-all extreme cardinal points.
+points/lines will be confined to B. We get the points that are on the
+boundary and on the bounding box at the same time, we call these
+"extreme points" and denote them with E, and we label them with their
+cardinal direction.
 
 Goal: We want to cut a corner C (also called subdivision) from P that
 contains the nearest-to-road point. The cut will be done using two
 lines, one horizontal (the green-line) and one vertical (the
 red-line). We want C to be of a given area A.
 
-Now get the closest point on R to P (we call this Q, this is the
-nearest point on the road to the polygon).
+Now get the closest two points on E to R, and depending on them, we
+decide which corner to cut.
 
 We'll use sweeping-lines for this. Any sweeping-lines mentioned will
 be moving away from the corner (in other words, away from the closest
