@@ -117,7 +117,7 @@ BEGIN
     labels := ARRAY[]::text[];
     extring := (
         SELECT
-        ST_ExteriorRing(ST_Envelope(ST_Collect(way)))
+        ST_ExteriorRing(ST_ConvexHull(ST_Collect(way)))
         FROM
         unnest(ps) m(way)
     );
@@ -127,18 +127,18 @@ BEGIN
         l := '';
 
         IF    ST_Y(p) = ST_YMax(extring) THEN
-            l := l || 'S';
-        ELSIF ST_Y(p) = ST_YMin(extring) THEN
             l := l || 'N';
+        ELSIF ST_Y(p) = ST_YMin(extring) THEN
+            l := l || 'S';
         END IF;
 
         IF    ST_X(p) = ST_XMin(extring) THEN
-            l := l || 'E';
-        ELSIF ST_X(p) = ST_XMax(extring) THEN
             l := l || 'W';
+        ELSIF ST_X(p) = ST_XMax(extring) THEN
+            l := l || 'E';
         END IF;
 
-        labels := ARRAY[l]::text[] || labels;
+        labels := (l || labels);
     END LOOP;
 
     RETURN labels;
@@ -412,20 +412,18 @@ END;
 $$ LANGUAGE plpgsql;
 
 
-
--- TODO: The boundary array elements are usually points. However, when
---       one of the boundary box edges is axis-parallel, the element will be a line
---       instead. So in rc2, ST_ClosestPoint might be needed. In rc2 we want to have
---       points and not lines. So, when computing rc2, if we find lines in the 
---       array boundary, we should use ST_ClosestPoint to get the closest point on
---       those lines instead.
+-- Note: The boundary array elements are usually points. However, when
+--       one of the edges of the boundary is axis-parallel, the element will be a line
+--       instead. Currently, we take the centroid of that line. This allows
+--       us to deal only with boundary points.
 --
---
--- this function will implement the corner-cut algorithm
+-- This function will implement the corner-cut algorithm
 -- the return value will be true if the parcel was found.
 -- 
--- it will return NULL if there was an error and false if
--- a partition was not found.
+-- Return value:
+-- -  NULL if there was an error
+-- -  false if a partition was not found
+--
 CREATE OR REPLACE FUNCTION pseudo_parcel(p_uid integer, target_area float) RETURNS boolean AS $$
 DECLARE
 -- original polygon
@@ -471,7 +469,7 @@ BEGIN
         -- the input polygon is too small and we won't be able to
         -- to find a parcel with the required area.
         RAISE NOTICE 'the polygon area is too small';
-        RETURN false;
+        RETURN NULL;
     END IF;
 
     RAISE NOTICE 'original area: %', p_area;
@@ -485,32 +483,32 @@ BEGIN
     );
     INSERT INTO support(way) VALUES (bbox);
 
-    -- get boundary extreme points
+    -- get boundary extreme points for polygon
     boundary := (
-        WITH int AS (
-            -- 
-            -- intersect the polygon's exterior ring with its envelope's exterior ring
-            -- to get the boundary extremum points (north,east,south,west).
-            --
-            -- (the result is an ST_MultiPoint, so it will need
-            --  to be unpacked in order to be used)
-            SELECT ST_Intersection(ST_ExteriorRing(way), ST_ExteriorRing(ST_Envelope(way))) AS way
+        WITH points AS (
+            SELECT
+            (ST_DumpPoints(way)).geom AS p
             FROM (
                 SELECT way 
                 FROM parcel 
                 WHERE gid = p_uid
             ) a
-        ), unpacked AS (
-            -- unpack ST_MultiPoint to ST_Point
-            SELECT (ST_Dump(way)).geom AS p
-            FROM int
+        ), west AS (
+            SELECT p FROM points ORDER BY ST_X(p)      LIMIT 1
+        ), east AS (
+            SELECT p FROM points ORDER BY ST_X(p) DESC LIMIT 1
+        ), north AS (
+            SELECT p FROM points ORDER BY ST_Y(p)      LIMIT 1
+        ), south AS (
+            SELECT p FROM points ORDER BY ST_Y(p) DESC LIMIT 1
         )
-        SELECT array_agg(p)
-        FROM unpacked
+        SELECT ARRAY[west.p, east.p, north.p, south.p]
+        FROM west,east,north,south
     );
     nesw := get_nesw(boundary);
-    RAISE NOTICE '%', nesw;
-    RAISE NOTICE '%', bbox;
+
+    RAISE NOTICE 'nesw: %', nesw;
+    RAISE NOTICE 'boundary types %', (SELECT array_agg(ST_GeometryType(p)) FROM unnest(boundary) a(p));
 
 
     -- the closest two boundary points to a nearby road
@@ -534,17 +532,19 @@ BEGIN
         FROM c1, c2
     );
 
+    RAISE NOTICE 'rc2 types %', (SELECT array_agg(ST_GeometryType(p)) FROM unnest(rc2) a(p));
+
     -- get the NESW labels of the two closest boundary points to the nearby road
     lrc := (
         SELECT
         array_agg(nesw[nesw_idx])
         FROM generate_series(1,2) a(rc2_idx)
-        JOIN generate_series(1,4) c(nesw_idx) ON boundary[nesw_idx] = rc2[rc2_idx]
+        JOIN generate_series(1,4) c(nesw_idx) ON ST_Distance(boundary[nesw_idx],rc2[rc2_idx]) < 0.001
     );
     -- lrc now has information about which corner we're going to cut.
-    RAISE NOTICE '%', lrc;
+    RAISE NOTICE 'lrc: %', lrc;
 
-    -- INSERT INTO support(way) SELECT * FROM unnest(boundary);
+    INSERT INTO support(way) SELECT * FROM unnest(boundary);
     INSERT INTO support(way) SELECT * FROM unnest(rc2) a;
 
     SELECT ST_XMax(p),ST_XMin(p),ST_YMax(p),ST_YMin(p)
@@ -560,8 +560,7 @@ BEGIN
     cut_corner := find_cut_corner(lrc);
     RAISE NOTICE 'cut corner: %', cut_corner;
 
-    -- north-west case
-    IF    cut_corner = 'NW' THEN
+    IF cut_corner = 'NW' THEN
         -- (bheight - sqrt(target_area)) is where the inset should be placed for NW corner
         inset_split := h_split(poly,bheight - sqrt(target_area),bxmin,bxmax,bymin,bymax);
         IF ST_Area(inset_split[2]) < target_area THEN
@@ -579,22 +578,99 @@ BEGIN
             -- so we're now looking for a vertical cut but applied to the upper part of the inset split (not on original poly)
             RAISE NOTICE 'inset split + vcut_search';
             cut_result := vcut_search(inset_split[2],1,target_area,ST_XMin(inset_split[2]),ST_XMax(inset_split[2]),ST_YMin(inset_split[2]),ST_YMax(inset_split[2]));
-            -- INSERT INTO support(way) SELECT inset_split[1];
-            -- INSERT INTO support(way) SELECT cut_result[1];
-
+            INSERT INTO support(way) SELECT inset_split[1];
+            INSERT INTO support(way) SELECT cut_result[1];
             -- update the original parcel
             UPDATE parcel SET way = ST_Union(inset_split[3], cut_result[3]) WHERE gid = p_uid;
             -- insert the new parcel 
             INSERT INTO parcel (way, pseudo) VALUES(cut_result[2], true);
         END IF;
+        RETURN true;
+    ELSIF cut_corner = 'NE' THEN
+        inset_split := h_split(poly,bheight - sqrt(target_area),bxmin,bxmax,bymin,bymax);
+        IF ST_Area(inset_split[2]) < target_area THEN
+            RAISE NOTICE 'hcut_search';
+            cut_result := hcut_search(poly,1,target_area,bxmin,bxmax,bymin,bymax);
+            -- update original parcel
+            UPDATE parcel SET way = cut_result[3] WHERE gid = p_uid;
+            -- insert the new parcel
+            INSERT INTO parcel(way, pseudo) VALUES(cut_result[2], true);
+        ELSE
+            RAISE NOTICE 'inset split + vcut_search';
+            cut_result := vcut_search(inset_split[2],2,target_area,ST_XMin(inset_split[2]),ST_XMax(inset_split[2]),ST_YMin(inset_split[2]),ST_YMax(inset_split[2]));
+            INSERT INTO support(way) SELECT inset_split[1];
+            INSERT INTO support(way) SELECT cut_result[1];
+            UPDATE parcel SET way = ST_Union(inset_split[3], cut_result[2]) WHERE gid = p_uid;
+            INSERT INTO parcel (way, pseudo) VALUES(cut_result[3], true);
+        END IF;
+        RETURN true;
+    ELSIF cut_corner = 'SE' THEN
+        inset_split := h_split(poly,sqrt(target_area),bxmin,bxmax,bymin,bymax);
+        IF ST_Area(inset_split[3]) < target_area THEN
+            RAISE NOTICE 'hcut_search';
+            cut_result := hcut_search(poly,2,target_area,bxmin,bxmax,bymin,bymax);
+            -- update original parcel
+            UPDATE parcel SET way = cut_result[2] WHERE gid = p_uid;
+            -- insert the new parcel
+            INSERT INTO parcel(way, pseudo) VALUES(cut_result[3], true);
+        ELSE
+            RAISE NOTICE 'inset split + vcut_search';
+            cut_result := vcut_search(inset_split[3],2,target_area,ST_XMin(inset_split[3]),ST_XMax(inset_split[3]),ST_YMin(inset_split[3]),ST_YMax(inset_split[3]));
+            INSERT INTO support(way) SELECT inset_split[1];
+            INSERT INTO support(way) SELECT cut_result[1];
+            UPDATE parcel SET way = ST_Union(inset_split[2], cut_result[2]) WHERE gid = p_uid;
+            INSERT INTO parcel (way, pseudo) VALUES(cut_result[3], true);
+        END IF;
+        RETURN true;
+    ELSIF cut_corner = 'SW' THEN
+        inset_split := h_split(poly,sqrt(target_area),bxmin,bxmax,bymin,bymax);
+        IF ST_Area(inset_split[3]) < target_area THEN
+            RAISE NOTICE 'hcut_search';
+            cut_result := hcut_search(poly,2,target_area,bxmin,bxmax,bymin,bymax);
+            -- update original parcel
+            UPDATE parcel SET way = cut_result[2] WHERE gid = p_uid;
+            -- insert the new parcel
+            INSERT INTO parcel(way, pseudo) VALUES(cut_result[3], true);
+        ELSE
+            RAISE NOTICE 'inset split + vcut_search';
+            cut_result := vcut_search(inset_split[3],1,target_area,ST_XMin(inset_split[3]),ST_XMax(inset_split[3]),ST_YMin(inset_split[3]),ST_YMax(inset_split[3]));
+            INSERT INTO support(way) SELECT inset_split[1];
+            INSERT INTO support(way) SELECT cut_result[1];
+            UPDATE parcel SET way = ST_Union(inset_split[2], cut_result[3]) WHERE gid = p_uid;
+            INSERT INTO parcel (way, pseudo) VALUES(cut_result[2], true);
+        END IF;
+        RETURN true;
     END IF;
 
-    RETURN true;
+    RETURN false;
 END;
 $$ LANGUAGE plpgsql;
 
-SELECT pseudo_parcel(1,4000.0); -- triggers inset + vcut
--- SELECT pseudo_parcel(1,30000.0); -- triggers a NW-corner cut with hcut_search
-\set QUIET 0
-SELECT parcels_draw();
 
+-- suppress output
+\o /dev/null
+-- cut parcels until there's no more land to cut
+DO $$
+DECLARE
+enough_land boolean;
+target_parcel_area float;
+BEGIN
+    target_parcel_area := 8000;
+
+    enough_land := true;
+    WHILE enough_land IS NOT NULL AND enough_land = true
+    LOOP
+        RAISE NOTICE '----';
+        enough_land := pseudo_parcel(1,target_parcel_area); 
+    END LOOP;
+END$$;
+-- re-enable stdout output
+-- TRUNCATE support RESTART IDENTITY; 
+\o
+
+-- Sample calls of pseudo_parcel:
+-- - 1,4000.0   -> triggers inset + vcut
+-- - 1,30000.0) -> triggers a NW-corner cut with hcut_search
+\set QUIET 0
+
+SELECT parcels_draw();
