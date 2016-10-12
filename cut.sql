@@ -586,7 +586,7 @@ BEGIN
             -- update original parcel
             UPDATE parcel SET way = cut_result[3] WHERE gid = p_uid;
             -- insert the new parcel
-            INSERT INTO parcel(way, pseudo) VALUES(cut_result[2], true);
+            INSERT INTO parcel (way, pseudo, parent_id) VALUES(cut_result[2], true, p_uid);
         ELSE
             -- the inset produced an upper area which is beyond what we need, we're looking to cut that area further
             -- so we're now looking for a vertical cut but applied to the upper part of the inset split (not on original poly)
@@ -597,7 +597,7 @@ BEGIN
             -- update the original parcel
             UPDATE parcel SET way = ST_Union(inset_split[3], cut_result[3]) WHERE gid = p_uid;
             -- insert the new parcel 
-            INSERT INTO parcel (way, pseudo) VALUES(cut_result[2], true);
+            INSERT INTO parcel (way, pseudo, parent_id) VALUES(cut_result[2], true, p_uid);
         END IF;
         RETURN true;
     ELSIF cut_corner = 'NE' THEN
@@ -608,14 +608,14 @@ BEGIN
             -- update original parcel
             UPDATE parcel SET way = cut_result[3] WHERE gid = p_uid;
             -- insert the new parcel
-            INSERT INTO parcel(way, pseudo) VALUES(cut_result[2], true);
+            INSERT INTO parcel (way, pseudo, parent_id) VALUES(cut_result[2], true, p_uid);
         ELSE
             RAISE NOTICE 'inset split + vcut_search';
             cut_result := vcut_search(inset_split[2],2,target_area,ST_XMin(inset_split[2]),ST_XMax(inset_split[2]),ST_YMin(inset_split[2]),ST_YMax(inset_split[2]));
             INSERT INTO support(way) SELECT inset_split[1];
             INSERT INTO support(way) SELECT cut_result[1];
             UPDATE parcel SET way = ST_Union(inset_split[3], cut_result[2]) WHERE gid = p_uid;
-            INSERT INTO parcel (way, pseudo) VALUES(cut_result[3], true);
+            INSERT INTO parcel (way, pseudo, parent_id) VALUES(cut_result[3], true, p_uid);
         END IF;
         RETURN true;
     ELSIF cut_corner = 'SE' THEN
@@ -626,14 +626,14 @@ BEGIN
             -- update original parcel
             UPDATE parcel SET way = cut_result[2] WHERE gid = p_uid;
             -- insert the new parcel
-            INSERT INTO parcel(way, pseudo) VALUES(cut_result[3], true);
+            INSERT INTO parcel (way, pseudo, parent_id) VALUES(cut_result[3], true, p_uid);
         ELSE
             RAISE NOTICE 'inset split + vcut_search';
             cut_result := vcut_search(inset_split[3],2,target_area,ST_XMin(inset_split[3]),ST_XMax(inset_split[3]),ST_YMin(inset_split[3]),ST_YMax(inset_split[3]));
             INSERT INTO support(way) SELECT inset_split[1];
             INSERT INTO support(way) SELECT cut_result[1];
             UPDATE parcel SET way = ST_Union(inset_split[2], cut_result[2]) WHERE gid = p_uid;
-            INSERT INTO parcel (way, pseudo) VALUES(cut_result[3], true);
+            INSERT INTO parcel (way, pseudo, parent_id) VALUES(cut_result[3], true, p_uid);
         END IF;
         RETURN true;
     ELSIF cut_corner = 'SW' THEN
@@ -644,14 +644,14 @@ BEGIN
             -- update original parcel
             UPDATE parcel SET way = cut_result[2] WHERE gid = p_uid;
             -- insert the new parcel
-            INSERT INTO parcel(way, pseudo) VALUES(cut_result[3], true);
+            INSERT INTO parcel (way, pseudo, parent_id) VALUES(cut_result[3], true, p_uid);
         ELSE
             RAISE NOTICE 'inset split + vcut_search';
             cut_result := vcut_search(inset_split[3],1,target_area,ST_XMin(inset_split[3]),ST_XMax(inset_split[3]),ST_YMin(inset_split[3]),ST_YMax(inset_split[3]));
             INSERT INTO support(way) SELECT inset_split[1];
             INSERT INTO support(way) SELECT cut_result[1];
             UPDATE parcel SET way = ST_Union(inset_split[2], cut_result[3]) WHERE gid = p_uid;
-            INSERT INTO parcel (way, pseudo) VALUES(cut_result[2], true);
+            INSERT INTO parcel (way, pseudo, parent_id) VALUES(cut_result[2], true, p_uid);
         END IF;
         RETURN true;
     END IF;

@@ -10,7 +10,8 @@ CREATE TABLE parcel (
     way geometry(Geometry,900913),
     -- will be true if this is a subdivision
     -- generated using corner-cutting. 
-    pseudo boolean default false
+    pseudo    boolean DEFAULT false,
+    parent_id integer REFERENCES parcel(gid) DEFAULT NULL
 );
 
 
