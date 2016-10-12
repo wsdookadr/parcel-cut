@@ -412,17 +412,14 @@ END;
 $$ LANGUAGE plpgsql;
 
 
--- Note: The boundary array elements are usually points. However, when
---       one of the edges of the boundary is axis-parallel, the element will be a line
---       instead. Currently, we take the centroid of that line. This allows
---       us to deal only with boundary points.
 --
 -- This function will implement the corner-cut algorithm
 -- the return value will be true if the parcel was found.
 -- 
 -- Return value:
 -- -  NULL if there was an error
--- -  false if a partition was not found
+-- - false if a parcel was not found
+-- -  true if a parcel was found
 --
 CREATE OR REPLACE FUNCTION pseudo_parcel(p_uid integer, target_area float) RETURNS boolean AS $$
 DECLARE
