@@ -510,7 +510,6 @@ BEGIN
     RAISE NOTICE 'nesw: %', nesw;
     RAISE NOTICE 'boundary types %', (SELECT array_agg(ST_GeometryType(p)) FROM unnest(boundary) a(p));
 
-
     -- the closest two boundary points to a nearby road
     rc2 := (
         WITH c1 AS (
@@ -560,6 +559,24 @@ BEGIN
     cut_corner := find_cut_corner(lrc);
     RAISE NOTICE 'cut corner: %', cut_corner;
 
+    --
+    -- we have four cases(one for each corner). all of the cases are very similar.
+    -- we make a horizontal split and if we don't have enough area we make a
+    -- better horizontal split with the same goal. otherwise we make a vertical split
+    -- to get the required area.
+    --
+    -- here's an example for the NW corner(with the two cases mentioned before):
+    --
+    -- 1)                               2)
+    -- +-----------------+              +-----------------+
+    -- | target |        |              | target          |
+    -- +--------+--------+              |                 |
+    -- |        |        |              +-----------------|
+    -- |        |        |              |                 |
+    -- |        |        |              |                 |
+    -- |        |        |              |                 |
+    -- +--------+--------+              +-----------------+
+    -- 
     IF cut_corner = 'NW' THEN
         -- (bheight - sqrt(target_area)) is where the inset should be placed for NW corner
         inset_split := h_split(poly,bheight - sqrt(target_area),bxmin,bxmax,bymin,bymax);
