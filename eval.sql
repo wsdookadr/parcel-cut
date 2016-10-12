@@ -1,3 +1,4 @@
+--
 -- this query evaluates parcel quality.
 -- fill ratio of the parcel is how much of its convex
 -- hull area the parcel covers.
@@ -34,22 +35,28 @@ ORDER BY fill_ratio ASC;
 -- compute leftover area after partitioning
 -- and coverage ratio for each partitioned polygon.
 SELECT
-parent.pid AS pid,
-ST_Area(parent.way) AS leftover,
-covered.area / (covered.area + ST_Area(parent.way)) AS coverage
+pids.pid AS pid,
+parent.area AS leftover,
+covered.area / (covered.area + parent.area) AS coverage
 FROM (
     -- get all distinct parent ids, in other words
     -- the ids for the polygons that have been
     -- partitioned
     SELECT
     DISTINCT ON(parent_id)
-    way,
     parent_id AS pid
     FROM parcel
     WHERE pseudo = true
-) parent,
+) pids,
 LATERAL (
     SELECT
     SUM(ST_Area(way)) AS area
-    FROM parcel WHERE parcel.parent_id = parent.pid
-) covered;
+    FROM parcel
+    WHERE parcel.parent_id = pids.pid
+) covered,
+LATERAL (
+    SELECT
+    ST_Area(way) AS area
+    FROM parcel
+    WHERE gid = pids.pid
+) parent;
