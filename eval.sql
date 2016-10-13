@@ -60,3 +60,24 @@ LATERAL (
     FROM parcel
     WHERE gid = pids.pid
 ) parent;
+
+--
+-- find overlapping parcels (there should be none)
+--
+WITH X AS (
+    SELECT
+    *
+    FROM parcel
+    WHERE pseudo = false
+)
+SELECT a.gid, b.gid
+FROM X a
+JOIN X b
+ON  ST_Overlaps(a.way,b.way)
+AND ST_AsText(a.way) <> ST_AsText(b.way);
+
+
+
+
+
+
