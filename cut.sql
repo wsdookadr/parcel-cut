@@ -95,57 +95,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-
--- Returns labels for the points received as input. A label can be one of 
--- N,E,S,W,NE,NW,SE,SW depending on their position on the bounding box. 
--- The input points are expected to be the extreme points on the boundary
--- of a polygon.
-CREATE OR REPLACE FUNCTION get_nesw(ps geometry[]) RETURNS text[] AS $$
-DECLARE
-extring   geometry;
-p         geometry;
-labels    text[];
-l         text;
-BEGIN
-    -- the way we're going to label points is as follows
-    -- we're going to check whether they have YMax or YMin
-    -- and add an 'N' or 'S' and then we're going to check if they have
-    -- an XMin or XMax and add an 'W' or 'E'.
-    --
-    -- for example, the label 'NW' means the point is on both on the north
-    -- and west edge of the bbox. this means it's the NW corner.
-    labels := ARRAY[]::text[];
-    extring := (
-        SELECT
-        ST_ExteriorRing(ST_ConvexHull(ST_Collect(way)))
-        FROM
-        unnest(ps) m(way)
-    );
-
-    FOREACH p IN ARRAY ps
-    LOOP
-        l := '';
-
-        IF    ST_Y(p) = ST_YMax(extring) THEN
-            l := l || 'N';
-        ELSIF ST_Y(p) = ST_YMin(extring) THEN
-            l := l || 'S';
-        END IF;
-
-        IF    ST_X(p) = ST_XMin(extring) THEN
-            l := l || 'W';
-        ELSIF ST_X(p) = ST_XMax(extring) THEN
-            l := l || 'E';
-        END IF;
-
-        labels := (l || labels);
-    END LOOP;
-
-    RETURN labels;
-END;
-$$ LANGUAGE plpgsql;
-
-
 -- 
 -- split a geometry horizontally and return three geometries
 -- - split line
@@ -396,78 +345,10 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- find which corner to cut
-CREATE OR REPLACE FUNCTION find_cut_corner(boundary geometry[]) RETURNS text AS $$
-DECLARE
--- labels for boundary points
-nesw       text[];
--- labels for near-road points
-lrc        text[];
--- two extreme points closest to the nearest road, and the road point
-rc2        geometry[];
--- random corner picked
-rand_corner integer;
-BEGIN
-    nesw := get_nesw(boundary);
-    RAISE NOTICE 'nesw: %', nesw;
-
-    -- the closest two boundary points to a nearby road
-    rc2 := (
-        WITH c1 AS (
-            SELECT
-            b.way
-            FROM road r, unnest(boundary) b(way)
-            ORDER BY r.way <-> b.way
-            LIMIT 1
-        ), c2 AS (
-            SELECT
-            b.way
-            FROM road r, unnest(boundary) b(way), c1
-            WHERE ST_AsText(b.way) <> ST_AsText(c1.way)
-            ORDER BY r.way <-> b.way
-            LIMIT 1
-        )
-        SELECT
-        ARRAY[c1.way,c2.way]
-        FROM c1, c2
-    );
-    INSERT INTO support(way) SELECT * FROM unnest(rc2) a;
-
-    RAISE NOTICE 'rc2 types %', (SELECT array_agg(ST_GeometryType(p)) FROM unnest(rc2) a(p));
-
-    -- get the NESW labels of the two closest boundary points to the nearby road
-    lrc := (
-        SELECT
-        array_agg(nesw[nesw_idx])
-        FROM generate_series(1,2) a(rc2_idx)
-        JOIN generate_series(1,4) c(nesw_idx) ON ST_Distance(boundary[nesw_idx],rc2[rc2_idx]) < 0.001
-    );
-
-    -- lrc now has information about which corner we're going to cut.
-    RAISE NOTICE 'lrc: %', lrc;
-    IF     (ARRAY['N'] <@ lrc AND ARRAY['W'] <@ lrc) OR ARRAY['NW'] <@ lrc THEN
-        RETURN 'NW';
-    ELSIF  (ARRAY['N'] <@ lrc AND ARRAY['E'] <@ lrc) OR ARRAY['NE'] <@ lrc THEN
-        RETURN 'NE';
-    ELSIF  (ARRAY['S'] <@ lrc AND ARRAY['W'] <@ lrc) OR ARRAY['SW'] <@ lrc THEN
-        RETURN 'SW';
-    ELSIF  (ARRAY['S'] <@ lrc AND ARRAY['E'] <@ lrc) OR ARRAY['SE'] <@ lrc THEN
-        RETURN 'SE';
-    ELSE
-        -- no definitive corner was identified.
-        -- (this can happen if the two closest points to the road
-        -- were both on the same edge of the bbox)
-        -- so we pick a random corner
-        rand_corner := (random() * 3 + 1)::int;
-        RETURN (ARRAY['NW','NE','SE','SW'])[rand_corner];
-    END IF;
-END;
-$$ LANGUAGE plpgsql;
-
-
 --
--- a different approach to corner-finding
--- (much easier than the first version, find_cut_corner)
+-- finds which corner to cut
+-- (this is the 2nd implementation of this functionality,
+-- as the first one was too complicated)
 --
 -- it only uses the boundary and the roads.
 -- finds which of the four centroid quadrants, the closest 
@@ -767,13 +648,16 @@ DO $$
 DECLARE
 enough_land boolean;
 target_parcel_area float;
+poly_to_partition  integer;
 BEGIN
-    target_parcel_area := 500.0;
+    poly_to_partition := 1;
+    target_parcel_area := 8000.0;
     enough_land := true;
+
     WHILE enough_land IS NOT NULL AND enough_land = true
     LOOP
         RAISE NOTICE '----';
-        enough_land := pseudo_parcel(1,target_parcel_area); 
+        enough_land := pseudo_parcel(poly_to_partition,target_parcel_area); 
     END LOOP;
 END$$;
 -- re-enable stdout output

@@ -119,8 +119,8 @@ CROSS JOIN LATERAL (
 * Implementation
 ** Visualization
 - [X] Need to use [[http://postgis.net/docs/ST_GeometryType.html][ST_GeometryType]] to draw parcels and roads differently
+- [X] Refactoring
 - [ ] Round off coordinates to save space on the SVG.
-- [ ] Refactoring
 ** Core algorithm
 - [X] Need to sort clock-wise to determine cardinal directions
       for boundary extremes and label them. This is needed so we know
@@ -129,8 +129,8 @@ CROSS JOIN LATERAL (
       will be used.
 - [X] Get green-line sweep trajectory
 - [X] Find green-line
-- [ ] Use inset-based green-line and red-line search as described in the spec
-- [ ] Update the cut polygon and insert the corner in the DB
+- [X] Use inset-based green-line and red-line search as described in the spec
+- [X] Update the cut polygon and insert the corner in the DB
 * Other
 CREATE VIEW roads_by_type AS
 SELECT *, tags->'highway' AS road_type
