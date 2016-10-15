@@ -102,6 +102,11 @@ $$ LANGUAGE plpgsql;
 -- - lower part
 --
 -- the split line will be tmid distance down from the highest point of poly
+--
+-- note: h_split and v_split will not check if the split point is out of range.
+--       that's something the caller should check.
+--       if any of the split line or the pieces resulted from the split were NULL
+--       the function will return a NULL.
 CREATE OR REPLACE FUNCTION h_split(poly geometry, tmid float, bxmin float, bxmax float, bymin float, bymax float) RETURNS geometry[] AS $$
 DECLARE
 baseline  geometry;
@@ -351,7 +356,7 @@ $$ LANGUAGE plpgsql;
 -- as the first one was too complicated)
 --
 -- it only uses the boundary and the roads.
--- finds which of the four centroid quadrants, the closest 
+-- finds which of the four centroid quadrants the closest 
 -- road point belongs to.
 --
 CREATE OR REPLACE FUNCTION find_cut_corner2(boundary geometry[], poly geometry) RETURNS text AS $$
@@ -427,8 +432,9 @@ bymax      float;
 cut_corner  text;
 -- the result of the inset split
 inset_split geometry[];
+inset_pos   float;
 -- area of the input polygon
-p_area     float;
+p_area      float;
 -- cut line
 cut_result  geometry[];
 -- constants indicating which piece to select after the split
@@ -520,123 +526,108 @@ BEGIN
     -- +--------+--------+              +-----------------+
     -- 
     IF cut_corner = 'NW' THEN
-        -- (bheight - sqrt(target_area)) is where the inset should be placed for NW corner
-        inset_split := h_split(poly,bheight - sqrt(target_area),bxmin,bxmax,bymin,bymax);
-        IF ST_Area(inset_split[2]) < target_area THEN
-            -- the inset cut was insufficient so we search for a horizontal cut
-            RAISE NOTICE 'hcut_search';
-            cut_result := hcut_search(poly,UPPER_PART,target_area,bxmin,bxmax,bymin,bymax);
-            IF cut_result IS NOT NULL THEN
-                -- INSERT INTO support(way) SELECT cut_result[1];
+        IF bheight - sqrt(target_area) > 0 THEN
+            -- (bheight - sqrt(target_area)) is where the inset should be placed for NW corner
+            inset_pos   := bheight - sqrt(target_area);
+            inset_split := h_split(poly,inset_pos,bxmin,bxmax,bymin,bymax);
+            IF ST_Area(inset_split[2]) < target_area THEN
+                -- the inset cut was insufficient so we search for a different horizontal cut
+                RAISE NOTICE 'hcut_search';
+                cut_result := hcut_search(poly,UPPER_PART,target_area,bxmin,bxmax,bymin,bymax);
                 -- update original parcel
                 UPDATE parcel SET way = cut_result[3] WHERE gid = p_uid;
                 -- insert the new parcel
                 INSERT INTO parcel (way, pseudo, parent_id) VALUES(cut_result[2], true, p_uid);
-            ELSE
-                RETURN false;
-            END IF;
-        ELSE
-            -- the inset produced an upper area which is beyond what we need, we're looking to cut that area further
-            -- so we're now looking for a vertical cut but applied to the upper part of the inset split (not on original poly)
-            RAISE NOTICE 'inset split + vcut_search';
-            cut_result := vcut_search(inset_split[2],LEFT_PART,target_area,ST_XMin(inset_split[2]),ST_XMax(inset_split[2]),ST_YMin(inset_split[2]),ST_YMax(inset_split[2]));
-            IF cut_result IS NOT NULL AND inset_split IS NOT NULL THEN
+            ELSIF bheight - sqrt(target_area) > 0 THEN
+                -- the inset produced an upper area which is more than what we need. we need to make another cut
+                -- so we're now looking for a vertical cut but applied to the upper part of the inset split (not on original poly)
+                RAISE NOTICE 'inset split + vcut_search';
+                cut_result := vcut_search(inset_split[2],LEFT_PART,target_area,ST_XMin(inset_split[2]),ST_XMax(inset_split[2]),ST_YMin(inset_split[2]),ST_YMax(inset_split[2]));
+
                 INSERT INTO support(way) SELECT inset_split[1];
                 INSERT INTO support(way) SELECT cut_result[1];
                 -- update the original parcel
                 UPDATE parcel SET way = ST_Union(inset_split[3], cut_result[3]) WHERE gid = p_uid;
                 -- insert the new parcel 
                 INSERT INTO parcel (way, pseudo, parent_id) VALUES(cut_result[2], true, p_uid);
-            ELSE
-                RETURN false;
             END IF;
+        ELSE
+            -- in this case, we have bheight - sqrt(target_area) < 0 so we do a vcut straight
+            -- on the original poly
+            cut_result := vcut_search(poly,LEFT_PART,target_area,bxmin,bxmax,bymin,bymax);
+            -- update the original parcel
+            UPDATE parcel SET way = cut_result[3] WHERE gid = p_uid;
+            -- insert the new parcel 
+            INSERT INTO parcel (way, pseudo, parent_id) VALUES(cut_result[2], true, p_uid);
         END IF;
-        RETURN true;
     ELSIF cut_corner = 'NE' THEN
-        inset_split := h_split(poly,bheight - sqrt(target_area),bxmin,bxmax,bymin,bymax);
-        IF ST_Area(inset_split[2]) < target_area THEN
-            RAISE NOTICE 'hcut_search';
-            cut_result := hcut_search(poly,UPPER_PART,target_area,bxmin,bxmax,bymin,bymax);
-            IF cut_result IS NOT NULL THEN
-                -- update original parcel
+        IF bheight - sqrt(target_area) > 0 THEN
+            inset_pos  := bheight - sqrt(target_area);
+            inset_split := h_split(poly,inset_pos,bxmin,bxmax,bymin,bymax);
+            IF ST_Area(inset_split[2]) < target_area THEN
+                RAISE NOTICE 'hcut_search';
+                cut_result := hcut_search(poly,UPPER_PART,target_area,bxmin,bxmax,bymin,bymax);
                 UPDATE parcel SET way = cut_result[3] WHERE gid = p_uid;
-                -- insert the new parcel
                 INSERT INTO parcel (way, pseudo, parent_id) VALUES(cut_result[2], true, p_uid);
             ELSE
-                RETURN false;
-            END IF;
-        ELSE
-            RAISE NOTICE 'inset split + vcut_search';
-            RAISE NOTICE 'i3 %', inset_split[3];
-            RAISE NOTICE 'cr2 %', cut_result[3];
-            cut_result := vcut_search(inset_split[2],RIGHT_PART,target_area,ST_XMin(inset_split[2]),ST_XMax(inset_split[2]),ST_YMin(inset_split[2]),ST_YMax(inset_split[2]));
-            IF cut_result IS NOT NULL AND inset_split IS NOT NULL THEN
+                RAISE NOTICE 'inset split + vcut_search';
+                cut_result := vcut_search(inset_split[2],RIGHT_PART,target_area,ST_XMin(inset_split[2]),ST_XMax(inset_split[2]),ST_YMin(inset_split[2]),ST_YMax(inset_split[2]));
                 INSERT INTO support(way) SELECT inset_split[1];
                 INSERT INTO support(way) SELECT cut_result[1];
-
-
                 UPDATE parcel SET way = ST_Union(inset_split[3], cut_result[2]) WHERE gid = p_uid;
                 INSERT INTO parcel (way, pseudo, parent_id) VALUES(cut_result[3], true, p_uid);
-            ELSE
-                RETURN false;
-            END IF;
-        END IF;
-        RETURN true;
-    ELSIF cut_corner = 'SE' THEN
-        inset_split := h_split(poly,sqrt(target_area),bxmin,bxmax,bymin,bymax);
-        IF ST_Area(inset_split[3]) < target_area THEN
-            RAISE NOTICE 'hcut_search';
-            cut_result := hcut_search(poly,LOWER_PART,target_area,bxmin,bxmax,bymin,bymax);
-            IF cut_result IS NOT NULL THEN
-                -- update original parcel
-                UPDATE parcel SET way = cut_result[2] WHERE gid = p_uid;
-                -- insert the new parcel
-                INSERT INTO parcel (way, pseudo, parent_id) VALUES(cut_result[3], true, p_uid);
-            ELSE
-                RETURN false;
             END IF;
         ELSE
-            RAISE NOTICE 'inset split + vcut_search';
-            cut_result := vcut_search(inset_split[3],RIGHT_PART,target_area,ST_XMin(inset_split[3]),ST_XMax(inset_split[3]),ST_YMin(inset_split[3]),ST_YMax(inset_split[3]));
-            IF cut_result IS NOT NULL AND inset_split IS NOT NULL THEN
+            cut_result := vcut_search(poly,RIGHT_PART,target_area,bxmin,bxmax,bymin,bymax);
+            UPDATE parcel SET way = cut_result[2] WHERE gid = p_uid;
+            INSERT INTO parcel (way, pseudo, parent_id) VALUES(cut_result[3], true, p_uid);
+        END IF;
+    ELSIF cut_corner = 'SE' THEN
+        IF sqrt(target_area) < bheight THEN
+            inset_pos   := sqrt(target_area);
+            inset_split := h_split(poly,inset_pos,bxmin,bxmax,bymin,bymax);
+            IF ST_Area(inset_split[3]) < target_area THEN
+                RAISE NOTICE 'hcut_search';
+                cut_result := hcut_search(poly,LOWER_PART,target_area,bxmin,bxmax,bymin,bymax);
+                UPDATE parcel SET way = cut_result[2] WHERE gid = p_uid;
+                INSERT INTO parcel (way, pseudo, parent_id) VALUES(cut_result[3], true, p_uid);
+            ELSE
+                RAISE NOTICE 'inset split + vcut_search';
+                cut_result := vcut_search(inset_split[3],RIGHT_PART,target_area,ST_XMin(inset_split[3]),ST_XMax(inset_split[3]),ST_YMin(inset_split[3]),ST_YMax(inset_split[3]));
                 INSERT INTO support(way) SELECT inset_split[1];
                 INSERT INTO support(way) SELECT cut_result[1];
                 UPDATE parcel SET way = ST_Union(inset_split[2], cut_result[2]) WHERE gid = p_uid;
                 INSERT INTO parcel (way, pseudo, parent_id) VALUES(cut_result[3], true, p_uid);
-            ELSE
-                RETURN false;
-            END IF;
-        END IF;
-        RETURN true;
-    ELSIF cut_corner = 'SW' THEN
-        inset_split := h_split(poly,sqrt(target_area),bxmin,bxmax,bymin,bymax);
-        IF ST_Area(inset_split[3]) < target_area THEN
-            RAISE NOTICE 'hcut_search';
-            cut_result := hcut_search(poly,LOWER_PART,target_area,bxmin,bxmax,bymin,bymax);
-            IF cut_result IS NOT NULL THEN
-                -- update original parcel
-                UPDATE parcel SET way = cut_result[2] WHERE gid = p_uid;
-                -- insert the new parcel
-                INSERT INTO parcel (way, pseudo, parent_id) VALUES(cut_result[3], true, p_uid);
-            ELSE
-                RETURN false;
             END IF;
         ELSE
-            RAISE NOTICE 'inset split + vcut_search';
-            cut_result := vcut_search(inset_split[3],LEFT_PART,target_area,ST_XMin(inset_split[3]),ST_XMax(inset_split[3]),ST_YMin(inset_split[3]),ST_YMax(inset_split[3]));
-            IF cut_result IS NOT NULL AND inset_split IS NOT NULL THEN
+            cut_result := vcut_search(poly,RIGHT_PART,target_area,bxmin,bxmax,bymin,bymax);
+            UPDATE parcel SET way = cut_result[2] WHERE gid = p_uid;
+            INSERT INTO parcel (way, pseudo, parent_id) VALUES(cut_result[3], true, p_uid);
+        END IF;
+    ELSIF cut_corner = 'SW' THEN
+        IF sqrt(target_area) < bheight THEN
+            inset_pos  := sqrt(target_area);
+            inset_split := h_split(poly,inset_pos,bxmin,bxmax,bymin,bymax);
+            IF ST_Area(inset_split[3]) < target_area THEN
+                RAISE NOTICE 'hcut_search';
+                cut_result := hcut_search(poly,LOWER_PART,target_area,bxmin,bxmax,bymin,bymax);
+                UPDATE parcel SET way = cut_result[2] WHERE gid = p_uid;
+                INSERT INTO parcel (way, pseudo, parent_id) VALUES(cut_result[3], true, p_uid);
+            ELSE
+                RAISE NOTICE 'inset split + vcut_search';
+                cut_result := vcut_search(inset_split[3],LEFT_PART,target_area,ST_XMin(inset_split[3]),ST_XMax(inset_split[3]),ST_YMin(inset_split[3]),ST_YMax(inset_split[3]));
                 INSERT INTO support(way) SELECT inset_split[1];
                 INSERT INTO support(way) SELECT cut_result[1];
                 UPDATE parcel SET way = ST_Union(inset_split[2], cut_result[3]) WHERE gid = p_uid;
                 INSERT INTO parcel (way, pseudo, parent_id) VALUES(cut_result[2], true, p_uid);
-            ELSE
-                RETURN false;
             END IF;
+        ELSE
+            cut_result := vcut_search(poly,LEFT_PART,target_area,bxmin,bxmax,bymin,bymax);
+            UPDATE parcel SET way = cut_result[3] WHERE gid = p_uid;
+            INSERT INTO parcel (way, pseudo, parent_id) VALUES(cut_result[2], true, p_uid);
         END IF;
-        RETURN true;
     END IF;
-
-    RETURN false;
+    RETURN true;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -646,20 +637,21 @@ $$ LANGUAGE plpgsql;
 -- cut parcels until there's no more land to cut
 DO $$
 DECLARE
-enough_land boolean;
-target_parcel_area float;
-poly_to_partition  integer;
+enough_land         boolean;
+target_parcel_area  float;
+poly_to_partition   integer;
 BEGIN
     poly_to_partition := 1;
     target_parcel_area := 8000.0;
     enough_land := true;
 
-    WHILE enough_land IS NOT NULL AND enough_land = true
+    WHILE enough_land IS NOT NULL
     LOOP
         RAISE NOTICE '----';
         enough_land := pseudo_parcel(poly_to_partition,target_parcel_area); 
     END LOOP;
 END$$;
+
 -- re-enable stdout output
 TRUNCATE support RESTART IDENTITY; 
 \o
