@@ -197,14 +197,10 @@ $$ LANGUAGE plpgsql;
 -- input:
 -- receives as parameters the initial polygon, the desired area,
 -- an integer indicating which part we're searching for (1 for upper and 2 for lower)
--- the x/y min/max of the bbox for the polygon.
+-- and the bbox coordinates for the polygon.
 --
 -- output:
--- returns the cut line
---
--- this cut is applied when the road is closest to the north-west corner
--- and therefore the NW corner will be cut. the sweep line will start in the
--- north and will travel towards south to find the required area above it.
+-- returns the cut line and the upper and lower parts.
 --
 -- the optimal cut line is found via binary search.  
 CREATE OR REPLACE FUNCTION hcut_search(poly geometry, updown integer, area float, bxmin float, bxmax float, bymin float, bymax float) RETURNS geometry[] AS $$
@@ -518,11 +514,12 @@ BEGIN
     -- 1)                               2)
     -- +-----------------+              +-----------------+
     -- | target |        |              | target          |
+    -- |        |        |              |                 |
     -- +--------+--------+              |                 |
-    -- |        |        |              +-----------------|
-    -- |        |        |              |                 |
-    -- |        |        |              |                 |
-    -- |        |        |              |                 |
+    -- |                 |              +-----------------|
+    -- |                 |              |                 |
+    -- |                 |              |                 |
+    -- |                 |              |                 |
     -- +--------+--------+              +-----------------+
     -- 
     IF cut_corner = 'NW' THEN
@@ -652,13 +649,10 @@ BEGIN
     END LOOP;
 END$$;
 
--- re-enable stdout output
 TRUNCATE support RESTART IDENTITY; 
+-- re-enable stdout output
 \o
 
--- Sample calls of pseudo_parcel:
--- - 1,4000.0   -> triggers inset + vcut
--- - 1,30000.0) -> triggers a NW-corner cut with hcut_search
 \set QUIET 0
 
 SELECT parcels_draw();
